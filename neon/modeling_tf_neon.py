@@ -46,12 +46,12 @@ from ...utils import (
     add_start_docstrings_to_model_forward,
     logging,
 )
-from .configuration_mistral import MistralConfig
+from .configuration_neon import NeonConfig
 
 
 logger = logging.get_logger(__name__)
 
-_CONFIG_FOR_DOC = "MistralConfig"
+_CONFIG_FOR_DOC = "NeonConfig"
 
 
 def _make_causal_mask(input_ids_shape, dtype, past_key_values_length=0):
@@ -235,7 +235,7 @@ class TFMistralAttention(keras.layers.Layer):
     and "Generating Long Sequences with Sparse Transformers".
     """
 
-    def __init__(self, config: MistralConfig, layer_idx: Optional[int] = None, **kwargs):
+    def __init__(self, config: NeonConfig, layer_idx: Optional[int] = None, **kwargs):
         super().__init__(**kwargs)
         self.config = config
         self.layer_idx = layer_idx
@@ -379,7 +379,7 @@ class TFMistralAttention(keras.layers.Layer):
 
 
 class TFMistralDecoderLayer(keras.layers.Layer):
-    def __init__(self, config: MistralConfig, layer_idx: int, **kwargs):
+    def __init__(self, config: NeonConfig, layer_idx: int, **kwargs):
         super().__init__(**kwargs)
         self.hidden_size = config.hidden_size
 
@@ -471,15 +471,15 @@ class TFMistralDecoderLayer(keras.layers.Layer):
 @keras_serializable
 class TFMistralMainLayer(keras.layers.Layer):
     """
-    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`MistralDecoderLayer`]
+    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`NeonDecoderLayer`]
 
     Args:
-        config: MistralConfig
+        config: NeonConfig
     """
 
-    config_class = MistralConfig
+    config_class = NeonConfig
 
-    def __init__(self, config: MistralConfig, **kwargs):
+    def __init__(self, config: NeonConfig, **kwargs):
         super().__init__(**kwargs)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
@@ -673,7 +673,7 @@ MISTRAL_START_DOCSTRING = r"""
     </Tip>
 
     Parameters:
-        config ([`MistralConfig`]): Model configuration class with all the parameters of the model.
+        config ([`NeonConfig`]): Model configuration class with all the parameters of the model.
             Initializing with a config file does not load the weights associated with the model, only the
             configuration. Check out the [`~TFPreTrainedModel.from_pretrained`] method to load the model weights.
 """
@@ -684,7 +684,7 @@ MISTRAL_START_DOCSTRING = r"""
     MISTRAL_START_DOCSTRING,
 )
 class TFMistralPreTrainedModel(TFPreTrainedModel):
-    config_class = MistralConfig
+    config_class = NeonConfig
     base_model_prefix = "model"
 
 
@@ -762,7 +762,7 @@ MISTRAL_INPUTS_DOCSTRING = r"""
     MISTRAL_START_DOCSTRING,
 )
 class TFMistralModel(TFMistralPreTrainedModel):
-    def __init__(self, config: MistralConfig, *inputs, **kwargs):
+    def __init__(self, config: NeonConfig, *inputs, **kwargs):
         super().__init__(config, *inputs, **kwargs)
         self.model = TFMistralMainLayer(config, name="model")
 
@@ -929,7 +929,7 @@ class TFMistralForCausalLM(TFMistralPreTrainedModel, TFCausalLanguageModelingLos
     """
     The Mistral Model transformer with a sequence classification head on top (linear layer).
 
-    [`MistralForSequenceClassification`] uses the last token in order to do the classification, as other causal models
+    [`NeonForSequenceClassification`] uses the last token in order to do the classification, as other causal models
     (e.g. GPT-2) do.
 
     Since it does classification on the last token, it requires to know the position of the last token. If a

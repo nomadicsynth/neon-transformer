@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2023 Mistral AI and the HuggingFace Inc. team. All rights reserved.
+# Copyright 2024 Neon Cortex and the HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,19 +12,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Mistral model configuration"""
+"""Neon model configuration"""
 
-from ...configuration_utils import PretrainedConfig
-from ...utils import logging
+from transformers.configuration_utils import PretrainedConfig
+from transformers.utils import logging
 
 
 logger = logging.get_logger(__name__)
 
 
-class MistralConfig(PretrainedConfig):
+# copied from transformers.models.mistral.configuration_mistral.MistralConfig
+class NeonConfig(PretrainedConfig):
     r"""
-    This is the configuration class to store the configuration of a [`MistralModel`]. It is used to instantiate an
-    Mistral model according to the specified arguments, defining the model architecture. Instantiating a configuration
+    This is the configuration class to store the configuration of a [`NeonModel`]. It is used to instantiate a
+    Neon model according to the specified arguments, defining the model architecture. Instantiating a configuration
     with the defaults will yield a similar configuration to that of the Mistral-7B-v0.1 or Mistral-7B-Instruct-v0.1.
 
     [mistralai/Mistral-7B-v0.1](https://huggingface.co/mistralai/Mistral-7B-v0.1)
@@ -36,8 +37,8 @@ class MistralConfig(PretrainedConfig):
 
     Args:
         vocab_size (`int`, *optional*, defaults to 32000):
-            Vocabulary size of the Mistral model. Defines the number of different tokens that can be represented by the
-            `inputs_ids` passed when calling [`MistralModel`]
+            Vocabulary size of the Neon model. Defines the number of different tokens that can be represented by the
+            `inputs_ids` passed when calling [`NeonModel`]
         hidden_size (`int`, *optional*, defaults to 4096):
             Dimension of the hidden representations.
         intermediate_size (`int`, *optional*, defaults to 14336):
@@ -58,7 +59,7 @@ class MistralConfig(PretrainedConfig):
         hidden_act (`str` or `function`, *optional*, defaults to `"silu"`):
             The non-linear activation function (function or string) in the decoder.
         max_position_embeddings (`int`, *optional*, defaults to `4096*32`):
-            The maximum sequence length that this model might ever be used with. Mistral's sliding window attention
+            The maximum sequence length that this model might ever be used with. Neon's sliding window attention
             allows sequence of up to 4096*32 tokens.
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
@@ -83,19 +84,19 @@ class MistralConfig(PretrainedConfig):
             The dropout ratio for the attention probabilities.
 
     ```python
-    >>> from transformers import MistralModel, MistralConfig
+    >>> from transformers import NeonModel, NeonConfig
 
     >>> # Initializing a Mistral 7B style configuration
-    >>> configuration = MistralConfig()
+    >>> configuration = NeonConfig()
 
     >>> # Initializing a model from the Mistral 7B style configuration
-    >>> model = MistralModel(configuration)
+    >>> model = NeonModel(configuration)
 
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
 
-    model_type = "mistral"
+    model_type = "neon"
     keys_to_ignore_at_inference = ["past_key_values"]
 
     def __init__(

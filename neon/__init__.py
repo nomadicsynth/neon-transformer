@@ -1,4 +1,4 @@
-# Copyright 2023 Mistral AI and The HuggingFace Inc. team. All rights reserved.
+# Copyright 2024 Neon Cortex and the HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 # limitations under the License.
 from typing import TYPE_CHECKING
 
-from ...utils import (
+from transformers.utils import (
     OptionalDependencyNotAvailable,
     _LazyModule,
     is_flax_available,
@@ -23,7 +23,7 @@ from ...utils import (
 
 
 _import_structure = {
-    "configuration_mistral": ["MistralConfig"],
+    "configuration_neon": ["NeonConfig"],
 }
 
 
@@ -33,12 +33,12 @@ try:
 except OptionalDependencyNotAvailable:
     pass
 else:
-    _import_structure["modeling_mistral"] = [
-        "MistralForCausalLM",
-        "MistralModel",
-        "MistralPreTrainedModel",
-        "MistralForSequenceClassification",
-        "MistralForTokenClassification",
+    _import_structure["modeling_neon"] = [
+        "NeonForCausalLM",
+        "NeonModel",
+        "NeonPreTrainedModel",
+        "NeonForSequenceClassification",
+        "NeonForTokenClassification",
     ]
 
 try:
@@ -47,10 +47,10 @@ try:
 except OptionalDependencyNotAvailable:
     pass
 else:
-    _import_structure["modeling_flax_mistral"] = [
-        "FlaxMistralForCausalLM",
-        "FlaxMistralModel",
-        "FlaxMistralPreTrainedModel",
+    _import_structure["modeling_flax_neon"] = [
+        "FlaxNeonForCausalLM",
+        "FlaxNeonModel",
+        "FlaxNeonPreTrainedModel",
     ]
 
 try:
@@ -59,16 +59,16 @@ try:
 except OptionalDependencyNotAvailable:
     pass
 else:
-    _import_structure["modeling_tf_mistral"] = [
-        "TFMistralModel",
-        "TFMistralForCausalLM",
-        "TFMistralForSequenceClassification",
-        "TFMistralPreTrainedModel",
+    _import_structure["modeling_tf_neon"] = [
+        "TFNeonModel",
+        "TFNeonForCausalLM",
+        "TFNeonForSequenceClassification",
+        "TFNeonPreTrainedModel",
     ]
 
 
 if TYPE_CHECKING:
-    from .configuration_mistral import MistralConfig
+    from .configuration_neon import NeonConfig
 
     try:
         if not is_torch_available():
@@ -76,12 +76,12 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .modeling_mistral import (
-            MistralForCausalLM,
-            MistralForSequenceClassification,
-            MistralForTokenClassification,
-            MistralModel,
-            MistralPreTrainedModel,
+        from .modeling_neon import (
+            NeonForCausalLM,
+            NeonForSequenceClassification,
+            NeonForTokenClassification,
+            NeonModel,
+            NeonPreTrainedModel,
         )
 
     try:
@@ -90,10 +90,10 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .modeling_flax_mistral import (
-            FlaxMistralForCausalLM,
-            FlaxMistralModel,
-            FlaxMistralPreTrainedModel,
+        from .modeling_flax_neon import (
+            FlaxNeonForCausalLM,
+            FlaxNeonModel,
+            FlaxNeonPreTrainedModel,
         )
 
     try:
@@ -102,11 +102,11 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .modeling_tf_mistral import (
-            TFMistralForCausalLM,
-            TFMistralForSequenceClassification,
-            TFMistralModel,
-            TFMistralPreTrainedModel,
+        from .modeling_tf_neon import (
+            TFNeonForCausalLM,
+            TFNeonForSequenceClassification,
+            TFNeonModel,
+            TFNeonPreTrainedModel,
         )
 
 

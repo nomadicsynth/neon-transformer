@@ -34,12 +34,12 @@ from ...modeling_flax_outputs import (
 )
 from ...modeling_flax_utils import ACT2FN, FlaxPreTrainedModel, append_call_sample_docstring, logging
 from ...utils import add_start_docstrings, add_start_docstrings_to_model_forward
-from .configuration_mistral import MistralConfig
+from .configuration_neon import NeonConfig
 
 
 logger = logging.get_logger(__name__)
 
-_CONFIG_FOR_DOC = "MistralConfig"
+_CONFIG_FOR_DOC = "NeonConfig"
 _REAL_CHECKPOINT_FOR_DOC = "mistralai/Mistral-7B-v0.1"
 _CHECKPOINT_FOR_DOC = "ksmcg/Mistral-tiny"
 
@@ -61,7 +61,7 @@ MISTRAL_START_DOCSTRING = r"""
     - [Parallelization](https://jax.readthedocs.io/en/latest/jax.html#parallelization-pmap)
 
     Parameters:
-        config ([`MistralConfig`]): Model configuration class with all the parameters of the model.
+        config ([`NeonConfig`]): Model configuration class with all the parameters of the model.
             Initializing with a config file does not load the weights associated with the model, only the
             configuration. Check out the [`~FlaxPreTrainedModel.from_pretrained`] method to load the model weights.
         dtype (`jax.numpy.dtype`, *optional*, defaults to `jax.numpy.float32`):
@@ -129,7 +129,7 @@ MISTRAL_INPUTS_DOCSTRING = r"""
 
 # Copied from transformers.models.llama.modeling_flax_llama.FlaxLlamaRMSNorm with Llama->Mistral
 class FlaxMistralRMSNorm(nn.Module):
-    config: MistralConfig
+    config: NeonConfig
     dtype: jnp.dtype = jnp.float32
 
     def setup(self):
@@ -148,7 +148,7 @@ class FlaxMistralRMSNorm(nn.Module):
 
 # Copied from transformers.models.llama.modeling_flax_llama.FlaxLlamaRotaryEmbedding with Llama->Mistral
 class FlaxMistralRotaryEmbedding(nn.Module):
-    config: MistralConfig
+    config: NeonConfig
     dtype: jnp.dtype = jnp.float32
 
     def setup(self):
@@ -170,7 +170,7 @@ class FlaxMistralRotaryEmbedding(nn.Module):
 
 # Copied from transformers.models.llama.modeling_flax_llama.FlaxLlamaMLP with Llama->Mistral
 class FlaxMistralMLP(nn.Module):
-    config: MistralConfig
+    config: NeonConfig
     dtype: jnp.dtype = jnp.float32
 
     def setup(self):
@@ -217,7 +217,7 @@ def rotate_half(tensor):
 
 
 class FlaxMistralAttention(nn.Module):
-    config: MistralConfig
+    config: NeonConfig
     dtype: jnp.dtype = jnp.float32
 
     def setup(self):
@@ -352,7 +352,7 @@ class FlaxMistralAttention(nn.Module):
 
 # Copied from transformers.models.llama.modeling_flax_llama.FlaxLlamaDecoderLayer with Llama->Mistral
 class FlaxMistralDecoderLayer(nn.Module):
-    config: MistralConfig
+    config: NeonConfig
     dtype: jnp.dtype = jnp.float32
 
     def setup(self):
@@ -400,13 +400,13 @@ class FlaxMistralPreTrainedModel(FlaxPreTrainedModel):
     models.
     """
 
-    config_class = MistralConfig
+    config_class = NeonConfig
     base_model_prefix = "model"
     module_class: nn.Module = None
 
     def __init__(
         self,
-        config: MistralConfig,
+        config: NeonConfig,
         input_shape: Tuple = (1, 1),
         seed: int = 0,
         dtype: jnp.dtype = jnp.float32,
@@ -528,7 +528,7 @@ class FlaxMistralPreTrainedModel(FlaxPreTrainedModel):
 
 # Copied from transformers.models.llama.modeling_flax_llama.FlaxLlamaLayerCollection with Llama->Mistral
 class FlaxMistralLayerCollection(nn.Module):
-    config: MistralConfig
+    config: NeonConfig
     dtype: jnp.dtype = jnp.float32
 
     def setup(self):
@@ -575,7 +575,7 @@ class FlaxMistralLayerCollection(nn.Module):
 
 # Copied from transformers.models.llama.modeling_flax_llama.FlaxLlamaModule with Llama->Mistral
 class FlaxMistralModule(nn.Module):
-    config: MistralConfig
+    config: NeonConfig
     dtype: jnp.dtype = jnp.float32
 
     def setup(self):
@@ -652,7 +652,7 @@ append_call_sample_docstring(
 
 # Copied from transformers.models.llama.modeling_flax_llama.FlaxLlamaForCausalLMModule with Llama->Mistral
 class FlaxMistralForCausalLMModule(nn.Module):
-    config: MistralConfig
+    config: NeonConfig
     dtype: jnp.dtype = jnp.float32
 
     def setup(self):

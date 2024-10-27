@@ -1,10 +1,10 @@
 # coding=utf-8
-# Copyright 2023 Mistral AI and the HuggingFace Inc. team. All rights reserved.
+# Copyright 2024 Neon Cortex and the HuggingFace Inc. team. All rights reserved.
 #
-# This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
-# and OPT implementations in this library. It has been modified from its
-# original forms to accommodate minor architectural differences compared
-# to GPT-NeoX and OPT used by the Meta AI team that trained the model.
+# This code is based on Mistral AI's modeling implementation and incorporates architectural
+# innovations from "nGPT: Normalized Transformer with Representation Learning on
+# The Hypersphere", Loshchilov et al (NVIDIA, 2024) and "Differential Transformer", Ye et al,
+# (Microsoft Research & Tsinghua University, 2024).
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""PyTorch Mistral model."""
+"""PyTorch Neon model."""
 
 import math
 from typing import List, Optional, Tuple, Union
@@ -26,40 +26,39 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from transformers.activations import ACT2FN
+from transformers.cache_utils import (Cache, DynamicCache, SlidingWindowCache,
+                                      StaticCache)
+from transformers.generation import GenerationMixin
+from transformers.modeling_attn_mask_utils import AttentionMaskConverter
+from transformers.modeling_outputs import (BaseModelOutputWithPast,
+                                           CausalLMOutputWithPast,
+                                           SequenceClassifierOutputWithPast,
+                                           TokenClassifierOutput)
+from transformers.modeling_utils import PreTrainedModel
+from transformers.utils import (add_start_docstrings,
+                                add_start_docstrings_to_model_forward,
+                                is_flash_attn_2_available,
+                                is_flash_attn_greater_or_equal_2_10,
+                                is_torchdynamo_compiling, logging,
+                                replace_return_docstrings)
 
-from ...activations import ACT2FN
-from ...cache_utils import Cache, DynamicCache, SlidingWindowCache, StaticCache
-from ...generation import GenerationMixin
-from ...modeling_attn_mask_utils import AttentionMaskConverter
-from ...modeling_outputs import (
-    BaseModelOutputWithPast,
-    CausalLMOutputWithPast,
-    SequenceClassifierOutputWithPast,
-    TokenClassifierOutput,
-)
-from ...modeling_utils import PreTrainedModel
-from ...utils import (
-    add_start_docstrings,
-    add_start_docstrings_to_model_forward,
-    is_flash_attn_2_available,
-    is_flash_attn_greater_or_equal_2_10,
-    is_torchdynamo_compiling,
-    logging,
-    replace_return_docstrings,
-)
-from .configuration_mistral import MistralConfig
+from neon.rotary import apply_rotary_emb
 
+from .configuration_neon import NeonConfig
+from .rms_norm import RMSNorm
 
 if is_flash_attn_2_available():
-    from ...modeling_flash_attention_utils import _flash_attention_forward
+    from transformers.modeling_flash_attention_utils import \
+        _flash_attention_forward
 
 logger = logging.get_logger(__name__)
 
-_CONFIG_FOR_DOC = "MistralConfig"
+_CONFIG_FOR_DOC = "NeonConfig"
 
-
-# Copied from transformers.models.llama.modeling_llama.LlamaRMSNorm with Llama->Mistral
-class MistralRMSNorm(nn.Module):
+# TODO(nomadicsynth): Should not be needed. Remove when done implementing nGPT, probably.
+# # Copied from transformers.models.llama.modeling_llama.LlamaRMSNorm with Llama->Mistral
+class NeonRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
         MistralRMSNorm is equivalent to T5LayerNorm
@@ -79,7 +78,8 @@ class MistralRMSNorm(nn.Module):
         return f"{tuple(self.weight.shape)}, eps={self.variance_epsilon}"
 
 
-class MistralRotaryEmbedding(nn.Module):
+# copied from transformers.models.mistral.modeling_mistral.MistralRotaryEmbedding
+class NeonRotaryEmbedding(nn.Module):
     def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
         super().__init__()
 
@@ -105,7 +105,7 @@ class MistralRotaryEmbedding(nn.Module):
             emb = torch.cat((freqs, freqs), dim=-1)
             cos = emb.cos()
             sin = emb.sin()
-        return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
+        return cos.to(dtype=x.dtype).squeeze(0), sin.to(dtype=x.dtype).squeeze(0)
 
 
 # Copied from transformers.models.llama.modeling_llama.rotate_half
@@ -143,8 +143,8 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
-
-class MistralMLP(nn.Module):
+# copied from transformers.models.mistral.modeling_mistral.MistralMLP
+class NeonMLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -171,13 +171,18 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
-class MistralAttention(nn.Module):
+def lambda_init_fn(depth):
+    return 0.8 - 0.6 * math.exp(-0.3 * depth)
+
+
+# modified from transformers.models.mistral.modeling_mistral.MistralAttention
+class NeonAttention(nn.Module):
     """
-    Multi-headed attention from 'Attention Is All You Need' paper. Modified to use sliding window attention: Longformer
-    and "Generating Long Sequences with Sparse Transformers".
+    Multi-headed attention incorporating differential attention mechanism from the DIFF Transformer paper.
+    Also includes sliding window attention from Longformer and Sparse Transformers.
     """
 
-    def __init__(self, config: MistralConfig, layer_idx: Optional[int] = None):
+    def __init__(self, config: NeonConfig, layer_idx: Optional[int] = None):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
@@ -190,20 +195,42 @@ class MistralAttention(nn.Module):
 
         self.attention_dropout = config.attention_dropout
         self.hidden_size = config.hidden_size
+
+        # Keep original number of heads - each will have a pair of attention matrices
         self.num_heads = config.num_attention_heads
-        self.head_dim = config.head_dim
-        self.num_key_value_heads = config.num_key_value_heads
+        self.num_key_value_heads = (config.num_key_value_heads 
+                                  if config.num_key_value_heads is not None 
+                                  else config.num_attention_heads)
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+
+        # Halve head_dim to accommodate paired attention matrices
+        self.head_dim = (config.head_dim // 2 if config.head_dim is not None 
+                        else config.hidden_size // config.num_attention_heads // 2)
+        self.scaling = self.head_dim ** -0.5
+
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
         self.is_causal = True
 
-        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
-        self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
-        self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
-        self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
+        # Projections need to account for paired attention matrices
+        # Q, K: Double width for pairs
+        # V: Same as K, will be reshaped to handle pairs
+        self.q_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
+        self.k_proj = nn.Linear(self.hidden_size, self.hidden_size // self.num_key_value_groups, bias=False)
+        self.v_proj = nn.Linear(self.hidden_size, self.hidden_size // self.num_key_value_groups, bias=False)
+        self.o_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
 
-        self.rotary_emb = MistralRotaryEmbedding(
+        # Initialize lambda parameters for differential attention
+        self.lambda_init = lambda_init_fn(self.layer_idx)
+        self.lambda_q1 = nn.Parameter(torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0, std=0.1))
+        self.lambda_k1 = nn.Parameter(torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0, std=0.1))
+        self.lambda_q2 = nn.Parameter(torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0, std=0.1))
+        self.lambda_k2 = nn.Parameter(torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0, std=0.1))
+
+        # Add RMSNorm for differential attention
+        self.subln = RMSNorm(2 * self.head_dim, eps=1e-5, elementwise_affine=True)
+
+        self.rotary_emb = NeonRotaryEmbedding(
             self.head_dim,
             max_position_embeddings=self.max_position_embeddings,
             base=self.rope_theta,
@@ -221,44 +248,69 @@ class MistralAttention(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
 
+        # Project and reshape for differential attention
         query_states = self.q_proj(hidden_states)
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
 
-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        query_states = query_states.view(bsz, q_len, 2 * self.num_heads, self.head_dim)
+        key_states = key_states.view(bsz, q_len, 2 * self.num_key_value_heads, self.head_dim)
+        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, 2 * self.head_dim)
 
+        # Apply rotary embeddings with interleaved format
         cos, sin = self.rotary_emb(value_states, position_ids)
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+        query_states = apply_rotary_emb(query_states, cos, sin, interleaved=True)
+        key_states = apply_rotary_emb(key_states, cos, sin, interleaved=True)
+
+        query_states = query_states.transpose(1, 2)
 
         if past_key_value is not None:
-            # sin and cos are specific to RoPE models; cache_position needed for the static cache
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+            key_states, value_states = past_key_value.update(
+                key_states, value_states, self.layer_idx, cache_kwargs
+            )
 
-        key_states = repeat_kv(key_states, self.num_key_value_groups)
-        value_states = repeat_kv(value_states, self.num_key_value_groups)
+        # Repeat KV heads if needed
+        key_states = repeat_kv(key_states.transpose(1, 2), self.num_key_value_groups)
+        value_states = repeat_kv(value_states.transpose(1, 2), self.num_key_value_groups)
 
-        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+        # Calculate attention scores with scaling
+        query_states = query_states * self.scaling
+        attn_weights = torch.matmul(query_states, key_states.transpose(-1, -2))
 
-        if attention_mask is not None:  # no matter the length, we just slice it
+        if attention_mask is not None:
             causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
             attn_weights = attn_weights + causal_mask
 
-        # upcast attention to fp32
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        # Apply softmax
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
+
+        # Calculate lambda values for differential attention
+        lambda_1 = torch.exp(torch.sum(self.lambda_q1 * self.lambda_k1, dim=-1).float()).type_as(query_states)
+        lambda_2 = torch.exp(torch.sum(self.lambda_q2 * self.lambda_k2, dim=-1).float()).type_as(query_states)
+        lambda_full = lambda_1 - lambda_2 + self.lambda_init
+
+        # Apply differential attention
+        attn_weights = attn_weights.view(bsz, self.num_heads, 2, q_len, q_len)
+        attn_weights = attn_weights[:, :, 0] - lambda_full * attn_weights[:, :, 1]
+
+        # Apply dropout
         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
+
+        # Get attention output
         attn_output = torch.matmul(attn_weights, value_states)
 
-        if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
+        # Apply sublayer normalization and scaling
+        attn_output = self.subln(attn_output)
+        attn_output = attn_output * (1 - self.lambda_init)
+
+        if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim * 2):
             raise ValueError(
-                f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.head_dim)}, but is"
+                f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.head_dim * 2)}, but is"
                 f" {attn_output.size()}"
             )
 
         attn_output = attn_output.transpose(1, 2).contiguous()
-
         attn_output = attn_output.view(bsz, q_len, -1)
         attn_output = self.o_proj(attn_output)
 
@@ -268,9 +320,10 @@ class MistralAttention(nn.Module):
         return attn_output, attn_weights, past_key_value
 
 
-class MistralFlashAttention2(MistralAttention):
+# copied from transformers.models.mistral.modeling_mistral.MistralFlashAttention2
+class NeonFlashAttention2(NeonAttention):
     """
-    Mistral flash attention module. This module inherits from `MistralAttention` as the weights of the module stays
+    Neon flash attention module. This module inherits from `NeonAttention` as the weights of the module stays
     untouched. The only required change would be on the forward pass where it needs to correctly call the public API of
     flash attention and deal with padding tokens in case the input contains any of them.
     """
@@ -308,16 +361,17 @@ class MistralFlashAttention2(MistralAttention):
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
 
-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        query_states = query_states.view(bsz, q_len, 2 * self.num_heads, self.head_dim)
+        key_states = key_states.view(bsz, q_len, 2 * self.num_key_value_heads, self.head_dim)
+        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, 2, self.head_dim)
 
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
             kv_seq_len += cache_position[0]
 
         cos, sin = self.rotary_emb(value_states, position_ids)
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+        query_states = apply_rotary_emb(query_states, cos, sin, interleaved=True)
+        key_states = apply_rotary_emb(key_states, cos, sin, interleaved=True)
 
         if past_key_value is not None:
             # Activate slicing cache only if the config has a value `sliding_windows` attribute
@@ -345,12 +399,9 @@ class MistralFlashAttention2(MistralAttention):
                     attention_mask = attention_mask[:, slicing_tokens:]
                     attention_mask = torch.cat([attention_mask, torch.ones_like(attention_mask[:, -1:])], dim=-1)
 
-            cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
+            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}  # Specific to RoPE models
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        # repeat k/v heads if n_kv_heads < n_heads
-        key_states = repeat_kv(key_states, self.num_key_value_groups)
-        value_states = repeat_kv(value_states, self.num_key_value_groups)
         dropout_rate = 0.0 if not self.training else self.attention_dropout
 
         # In PEFT, usually we cast the layer norms in float32 for training stability reasons
@@ -376,15 +427,16 @@ class MistralFlashAttention2(MistralAttention):
             key_states = key_states.to(target_dtype)
             value_states = value_states.to(target_dtype)
 
-        # Reashape to the expected shape for Flash Attention
-        query_states = query_states.transpose(1, 2)
-        key_states = key_states.transpose(1, 2)
-        value_states = value_states.transpose(1, 2)
+        # Reshape to the expected shape for Flash Attention
+        query_states = query_states.reshape(bsz, q_len, self.num_heads, 2, self.head_dim)
+        key_states = key_states.reshape(bsz, q_len, self.num_key_value_heads, 2, self.head_dim)
 
-        attn_output = _flash_attention_forward(
-            query_states,
-            key_states,
-            value_states,
+        q1, q2 = query_states[:, :, :, 0], query_states[:, :, :, 1]
+        k1, k2 = key_states[:, :, :, 0], key_states[:, :, :, 1]
+        v1, v2 = value_states[:, :, :, 0], value_states[:, :, :, 1]
+
+        attn11 = _flash_attention_forward(
+            q1, k1, v1,
             attention_mask,
             q_len,
             position_ids=position_ids,
@@ -393,8 +445,55 @@ class MistralFlashAttention2(MistralAttention):
             use_top_left_mask=self._flash_attn_uses_top_left_mask,
             is_causal=self.is_causal,
         )
+        attn12 = _flash_attention_forward(
+            q1, k1, v2,
+            attention_mask,
+            q_len,
+            position_ids=position_ids,
+            dropout=dropout_rate,
+            sliding_window=getattr(self.config, "sliding_window", None),
+            use_top_left_mask=self._flash_attn_uses_top_left_mask,
+            is_causal=self.is_causal,
+        )
+        attn1 = torch.cat([attn11, attn12], dim=-1)
 
-        attn_output = attn_output.reshape(bsz, q_len, self.num_heads * self.head_dim).contiguous()
+        attn21 = _flash_attention_forward(
+            q2, k2, v1,
+            attention_mask,
+            q_len,
+            position_ids=position_ids,
+            dropout=dropout_rate,
+            sliding_window=getattr(self.config, "sliding_window", None),
+            use_top_left_mask=self._flash_attn_uses_top_left_mask,
+            is_causal=self.is_causal,
+        )
+        attn22 = _flash_attention_forward(
+            q2, k2, v2,
+            attention_mask,
+            q_len,
+            position_ids=position_ids,
+            dropout=dropout_rate,
+            sliding_window=getattr(self.config, "sliding_window", None),
+            use_top_left_mask=self._flash_attn_uses_top_left_mask,
+            is_causal=self.is_causal,
+        )
+        attn2 = torch.cat([attn21, attn22], dim=-1)
+
+        lambda_1 = torch.exp(torch.sum(self.lambda_q1 * self.lambda_k1, dim=-1).float()).type_as(query_states)
+        lambda_2 = torch.exp(torch.sum(self.lambda_q2 * self.lambda_k2, dim=-1).float()).type_as(query_states)
+        lambda_full = lambda_1 - lambda_2 + self.lambda_init
+
+        attn_output = attn1 - lambda_full * attn2
+        attn_output = self.subln(attn_output).type_as(query_states)
+        attn_output = attn_output * (1 - self.lambda_init)
+
+        if attn_output.size() != (bsz, q_len, self.num_heads, self.head_dim * 2):
+            raise ValueError(
+                f"`attn_output` should be of size {(bsz, q_len, self.num_heads, self.head_dim * 2)}, but is"
+                f" {attn_output.size()}"
+            )
+
+        attn_output = attn_output.reshape(bsz, q_len, self.num_heads * 2 * self.head_dim).contiguous()
         attn_output = self.o_proj(attn_output)
 
         if not output_attentions:
@@ -403,16 +502,15 @@ class MistralFlashAttention2(MistralAttention):
         return attn_output, attn_weights, past_key_value
 
 
-# copied from transformers.models.llama.modeling_llama.LlamaSdpaAttention with Llama->Mistral
-# TODO(joao): add me back asap :)
-class MistralSdpaAttention(MistralAttention):
+# copied from transformers.models.mistral.modeling_mistral.MistralSdpaAttention
+class NeonSdpaAttention(NeonAttention):
     """
-    Mistral attention module using torch.nn.functional.scaled_dot_product_attention. This module inherits from
-    `MistralAttention` as the weights of the module stays untouched. The only changes are on the forward pass to adapt to
+    Neon attention module using torch.nn.functional.scaled_dot_product_attention. This module inherits from
+    `NeonAttention` as the weights of the module stays untouched. The only changes are on the forward pass to adapt to
     SDPA API.
     """
 
-    # Adapted from MistralAttention.forward
+    # Adapted from MistralSdpaAttention.forward
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -427,7 +525,7 @@ class MistralSdpaAttention(MistralAttention):
         if output_attentions:
             # TODO: Improve this warning with e.g. `model.config.attn_implementation = "manual"` once this is implemented.
             logger.warning_once(
-                "MistralModel is using MistralSdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
+                "NeonModel is using NeonSdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
                 'but specifying the manual implementation will be required from Transformers version v5.0.0 onwards. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
             )
             return super().forward(
@@ -493,25 +591,24 @@ class MistralSdpaAttention(MistralAttention):
         return attn_output, None, past_key_value
 
 
-MISTRAL_ATTENTION_CLASSES = {
-    "eager": MistralAttention,
-    "flash_attention_2": MistralFlashAttention2,
-    "sdpa": MistralSdpaAttention,
+NEON_ATTENTION_CLASSES = {
+    "eager": NeonAttention,
+    "flash_attention_2": NeonFlashAttention2,
+    "sdpa": NeonSdpaAttention,
 }
 
 
-# copied from transformers.models.llama.modeling_llama.LlamaDecoderLayer with Llama->Mistral, LLAMA->MISTRAL
-# TODO(joao): add me back asap :)
-class MistralDecoderLayer(nn.Module):
-    def __init__(self, config: MistralConfig, layer_idx: int):
+# copied from transformers.models.mistral.modeling_mistral.MistralDecoderLayer
+class NeonDecoderLayer(nn.Module):
+    def __init__(self, config: NeonConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
 
-        self.self_attn = MISTRAL_ATTENTION_CLASSES[config._attn_implementation](config=config, layer_idx=layer_idx)
+        self.self_attn = NEON_ATTENTION_CLASSES[config._attn_implementation](config=config, layer_idx=layer_idx)
 
-        self.mlp = MistralMLP(config)
-        self.input_layernorm = MistralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = MistralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.mlp = NeonMLP(config)
+        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
+        self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
 
     def forward(
         self,
@@ -577,7 +674,7 @@ class MistralDecoderLayer(nn.Module):
         return outputs
 
 
-MISTRAL_START_DOCSTRING = r"""
+NEON_START_DOCSTRING = r"""
     This model inherits from [`PreTrainedModel`]. Check the superclass documentation for the generic methods the
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
     etc.)
@@ -587,7 +684,7 @@ MISTRAL_START_DOCSTRING = r"""
     and behavior.
 
     Parameters:
-        config ([`MistralConfig`]):
+        config ([`NeonConfig`]):
             Model configuration class with all the parameters of the model. Initializing with a config file does not
             load the weights associated with the model, only the configuration. Check out the
             [`~PreTrainedModel.from_pretrained`] method to load the model weights.
@@ -595,14 +692,15 @@ MISTRAL_START_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare Mistral Model outputting raw hidden-states without any specific head on top.",
-    MISTRAL_START_DOCSTRING,
+    "The bare Neon Model outputting raw hidden-states without any specific head on top.",
+    NEON_START_DOCSTRING,
 )
-class MistralPreTrainedModel(PreTrainedModel):
-    config_class = MistralConfig
+# copied from transformers.models.mistral.modeling_mistral.MistralPreTrainedModel
+class NeonPreTrainedModel(PreTrainedModel):
+    config_class = NeonConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
-    _no_split_modules = ["MistralDecoderLayer"]
+    _no_split_modules = ["NeonDecoderLayer"]
     _skip_keys_device_placement = "past_key_values"
     _supports_flash_attn_2 = True
     _supports_sdpa = True
@@ -621,7 +719,7 @@ class MistralPreTrainedModel(PreTrainedModel):
                 module.weight.data[module.padding_idx].zero_()
 
 
-MISTRAL_INPUTS_DOCSTRING = r"""
+NEON_INPUTS_DOCSTRING = r"""
     Args:
         input_ids (`torch.LongTensor` of shape `(batch_size, sequence_length)`):
             Indices of input sequence tokens in the vocabulary. Padding will be ignored by default should you provide
@@ -693,28 +791,29 @@ MISTRAL_INPUTS_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare Mistral Model outputting raw hidden-states without any specific head on top.",
-    MISTRAL_START_DOCSTRING,
+    "The bare Neon Model outputting raw hidden-states without any specific head on top.",
+    NEON_START_DOCSTRING,
 )
-class MistralModel(MistralPreTrainedModel):
+# copied from transformers.models.mistral.modeling_mistral.MistralModel
+class NeonModel(NeonPreTrainedModel):
     """
-    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`MistralDecoderLayer`]
+    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`NeonDecoderLayer`]
 
     Args:
-        config: MistralConfig
+        config: NeonConfig
     """
 
-    def __init__(self, config: MistralConfig):
+    def __init__(self, config: NeonConfig):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList(
-            [MistralDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+            [NeonDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
         self._attn_implementation = config._attn_implementation
-        self.norm = MistralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
 
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
@@ -726,7 +825,7 @@ class MistralModel(MistralPreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
-    @add_start_docstrings_to_model_forward(MISTRAL_INPUTS_DOCSTRING)
+    @add_start_docstrings_to_model_forward(NEON_INPUTS_DOCSTRING)
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -865,7 +964,7 @@ class MistralModel(MistralPreTrainedModel):
                 if is_padding_right:
                     raise ValueError(
                         "You are attempting to perform batched generation with padding_side='right'"
-                        " this may lead to unexpected behaviour for Flash Attention version of Mistral. Make sure to "
+                        " this may lead to unexpected behaviour for Flash Attention version of Neon. Make sure to "
                         " call `tokenizer.padding_side  = 'left'` before tokenizing the input. "
                     )
             if attention_mask is not None and 0.0 in attention_mask:
@@ -951,12 +1050,13 @@ class MistralModel(MistralPreTrainedModel):
         return causal_mask
 
 
-class MistralForCausalLM(MistralPreTrainedModel, GenerationMixin):
+# copied from transformers.models.mistral.modeling_mistral.MistralForCausalLM
+class NeonForCausalLM(NeonPreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config):
         super().__init__(config)
-        self.model = MistralModel(config)
+        self.model = NeonModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
@@ -981,7 +1081,7 @@ class MistralForCausalLM(MistralPreTrainedModel, GenerationMixin):
     def get_decoder(self):
         return self.model
 
-    @add_start_docstrings_to_model_forward(MISTRAL_INPUTS_DOCSTRING)
+    @add_start_docstrings_to_model_forward(NEON_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=CausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
@@ -1015,9 +1115,9 @@ class MistralForCausalLM(MistralPreTrainedModel, GenerationMixin):
         Example:
 
         ```python
-        >>> from transformers import AutoTokenizer, MistralForCausalLM
+        >>> from transformers import AutoTokenizer, NeonForCausalLM
 
-        >>> model = MistralForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1")
+        >>> model = NeonForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1")
         >>> tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
 
         >>> prompt = "Hey, are you conscious? Can you talk to me?"
@@ -1139,9 +1239,9 @@ class MistralForCausalLM(MistralPreTrainedModel, GenerationMixin):
 
 @add_start_docstrings(
     """
-    The Mistral Model transformer with a sequence classification head on top (linear layer).
+    The Neon Model transformer with a sequence classification head on top (linear layer).
 
-    [`MistralForSequenceClassification`] uses the last token in order to do the classification, as other causal models
+    [`NeonForSequenceClassification`] uses the last token in order to do the classification, as other causal models
     (e.g. GPT-2) do.
 
     Since it does classification on the last token, it requires to know the position of the last token. If a
@@ -1150,14 +1250,14 @@ class MistralForCausalLM(MistralPreTrainedModel, GenerationMixin):
     padding tokens when `inputs_embeds` are passed instead of `input_ids`, it does the same (take the last value in
     each row of the batch).
     """,
-    MISTRAL_START_DOCSTRING,
+    NEON_START_DOCSTRING,
 )
-# Copied from transformers.models.llama.modeling_llama.LlamaForSequenceClassification with Llama->Mistral, LLAMA->MISTRAL
-class MistralForSequenceClassification(MistralPreTrainedModel):
+# copied from transformers.models.mistral.modeling_mistral.MistralForSequenceClassification
+class NeonForSequenceClassification(NeonPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
-        self.model = MistralModel(config)
+        self.model = NeonModel(config)
         self.score = nn.Linear(config.hidden_size, self.num_labels, bias=False)
 
         # Initialize weights and apply final processing
@@ -1169,7 +1269,7 @@ class MistralForSequenceClassification(MistralPreTrainedModel):
     def set_input_embeddings(self, value):
         self.model.embed_tokens = value
 
-    @add_start_docstrings_to_model_forward(MISTRAL_INPUTS_DOCSTRING)
+    @add_start_docstrings_to_model_forward(NEON_INPUTS_DOCSTRING)
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -1263,17 +1363,17 @@ class MistralForSequenceClassification(MistralPreTrainedModel):
 
 @add_start_docstrings(
     """
-    The Mistral Model transformer with a token classification head on top (a linear layer on top of the hidden-states
+    The Neon Model transformer with a token classification head on top (a linear layer on top of the hidden-states
     output) e.g. for Named-Entity-Recognition (NER) tasks.
     """,
-    MISTRAL_START_DOCSTRING,
+    NEON_START_DOCSTRING,
 )
-# Copied from transformers.models.llama.modeling_llama.LlamaForTokenClassification with Llama->Mistral, LLAMA->MISTRAL
-class MistralForTokenClassification(MistralPreTrainedModel):
+# copied from transformers.models.mistral.modeling_mistral.MistralForTokenClassification
+class NeonForTokenClassification(NeonPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
-        self.model = MistralModel(config)
+        self.model = NeonModel(config)
         if getattr(config, "classifier_dropout", None) is not None:
             classifier_dropout = config.classifier_dropout
         elif getattr(config, "hidden_dropout", None) is not None:
@@ -1292,7 +1392,7 @@ class MistralForTokenClassification(MistralPreTrainedModel):
     def set_input_embeddings(self, value):
         self.model.embed_tokens = value
 
-    @add_start_docstrings_to_model_forward(MISTRAL_INPUTS_DOCSTRING)
+    @add_start_docstrings_to_model_forward(NEON_INPUTS_DOCSTRING)
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,

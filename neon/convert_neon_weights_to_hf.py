@@ -1,4 +1,4 @@
-# Copyright 2023 Mistral AI and The HuggingFace Inc. team. All rights reserved.
+# Copyright 2024 Neon Cortex and the HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,8 +23,8 @@ from safetensors.torch import load_file as safe_load_file
 
 from transformers import (
     LlamaTokenizer,
-    MistralConfig,
-    MistralForCausalLM,
+    NeonConfig,
+    NeonForCausalLM,
 )
 
 
@@ -43,16 +43,16 @@ except ImportError as e:
 Sample usage:
 
 ```
-python src/transformers/models/mistral/convert_mistral_weights_to_hf.py \
-    --input_dir /path/to/downloaded/mistral/weights --model_size 7B --output_dir /output/path
+python src/transformers/models/neon/convert_neon_weights_to_hf.py \
+    --input_dir /path/to/downloaded/neon/weights --model_size 7B --output_dir /output/path
 ```
 
 Thereafter, models can be loaded via:
 
 ```py
-from transformers import MistralForCausalLM, LlamaTokenizer
+from transformers import NeonForCausalLM, LlamaTokenizer
 
-model = MistralForCausalLM.from_pretrained("/output/path")
+model = NeonForCausalLM.from_pretrained("/output/path")
 tokenizer = LlamaTokenizer.from_pretrained("/output/path")
 ```
 
@@ -215,7 +215,7 @@ def write_model(model_path, input_base_path, model_size, tokenizer_path=None, sa
     # Write configs
     index_dict["metadata"] = {"total_size": param_count * 2}
     write_json(index_dict, os.path.join(tmp_model_path, "pytorch_model.bin.index.json"))
-    config = MistralConfig(
+    config = NeonConfig(
         hidden_size=dim,
         intermediate_size=params["hidden_dim"],
         num_attention_heads=params["n_heads"],
@@ -234,8 +234,8 @@ def write_model(model_path, input_base_path, model_size, tokenizer_path=None, sa
     del loaded
     gc.collect()
 
-    print("Loading the checkpoint in a Mistral model.")
-    model = MistralForCausalLM.from_pretrained(tmp_model_path, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True)
+    print("Loading the checkpoint in a Neon model.")
+    model = NeonForCausalLM.from_pretrained(tmp_model_path, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True)
     # Avoid saving this as part of the config.
     del model.config._name_or_path
     model.config.torch_dtype = torch.float16
