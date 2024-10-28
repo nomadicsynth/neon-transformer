@@ -1,8 +1,11 @@
+print("Loading imports")
 from dataclasses import dataclass, field
-from typing import Dict
 
+import evaluate
+import torch
 from datasets import load_dataset
-from transformers import DataCollatorForLanguageModeling, Trainer, TrainingArguments
+from transformers import EvalPrediction
+from trl import SFTConfig, SFTTrainer
 
 from neon import NeonConfig, NeonForCausalLM
 
@@ -19,12 +22,17 @@ class ModelArguments:
 
 @dataclass
 class DataArguments:
-    max_seq_length: int = field(default=512)
-    dataset_name: str = field(default="wikimedia/wikipedia")
-    dataset_config_name: str = field(default="20231101.simple")
+    dataset_name: str = field(default="HuggingFaceFW/fineweb")
+    dataset_config_name: str = field(default="sample-10BT")
     num_train_samples: int = field(default=1000)
     num_eval_samples: int = field(default=100)
-    streaming: bool = field(default=False)
+    streaming: bool = field(default=True)
+
+
+@dataclass
+class WandbArguments:
+    project_name: str = field(default="neon-test", metadata={"help": "Name of the W&B project"})
+    watch: str = field(default="false", metadata={"help": "Whether to watch the training", "choices": ["all", "gradients", "parameters", "false"]})
 
 
 def get_model_config(model_size: str) -> NeonConfig:
@@ -80,7 +88,7 @@ def get_model_config(model_size: str) -> NeonConfig:
     base_config = dict(
         max_position_embeddings=2048,
         vocab_size=32000,
-        attention_dropout=0.1,
+        attention_dropout=0.0,
         hidden_dropout=0.1,
         activation_function="silu",
         initializer_range=0.02,
@@ -97,27 +105,14 @@ def prepare_dataset(args: DataArguments):
     from transformers import AutoTokenizer
 
     # Load tokenizer
+    print("Loading tokenizer")
     tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
 
     # Set pad token to eos token
     tokenizer.pad_token = tokenizer.eos_token
 
-    def tokenize_function(examples):
-        tokenized_examples = {}
-        tokenized_examples = tokenizer(
-            examples["text"],
-            truncation=True,
-            max_length=args.max_seq_length,
-            padding="max_length",
-            # return_tensors="pt",
-        )
-
-        # Add labels to the tokenized examples
-        tokenized_examples["labels"] = tokenized_examples["input_ids"]
-
-        return tokenized_examples
-
     # Load dataset with streaming if specified
+    print("Loading dataset")
     dataset = load_dataset(
         args.dataset_name,
         args.dataset_config_name,
@@ -125,12 +120,15 @@ def prepare_dataset(args: DataArguments):
         split="train",
     )
 
+    print("Splitting dataset")
     if args.streaming:
-        # For streaming datasets, use take() and skip()
-        train_dataset = dataset.take(args.num_train_samples)
-        # Skip the training samples to get to the validation set
-        temp_dataset = dataset.skip(args.num_train_samples)
-        validation_dataset = temp_dataset.take(args.num_eval_samples)
+        validation_dataset = dataset.take(args.num_eval_samples)
+        temp_dataset = dataset.skip(args.num_eval_samples)
+        train_dataset = (
+            temp_dataset.take(args.num_train_samples)
+            if args.num_train_samples > 0
+            else temp_dataset
+        )
 
         from datasets import IterableDatasetDict
 
@@ -138,88 +136,126 @@ def prepare_dataset(args: DataArguments):
         dataset["train"] = train_dataset
         dataset["test"] = validation_dataset
 
-        # Apply tokenization to streaming datasets
-        dataset = dataset.map(
-            tokenize_function,
-            remove_columns=dataset["train"].column_names,
-        )
     else:
         dataset = dataset["train"].train_test_split(
             test_size=args.num_eval_samples,
             train_size=args.num_train_samples,
             shuffle=True,
-            seed=42,
-        )
-
-        # Apply tokenization to regular datasets
-        dataset = dataset.map(
-            tokenize_function,
-            batched=True,
-            remove_columns=dataset["train"].column_names,
-            num_proc=4,
+            seed=args.seed,
         )
 
     return dataset, tokenizer
 
 
+metric_accuracy = evaluate.load("accuracy")
+
+
+# Compute the evaluation metrics
+def compute_metrics(eval_pred: EvalPrediction, compute_result=False):
+    with torch.no_grad():
+        # Get the logits, attention mask, and labels
+        logits = eval_pred.predictions.detach()
+        metric_labels = eval_pred.label_ids.detach()
+        attention_mask = eval_pred.inputs["attention_mask"].detach()
+
+        # Shift the labels and attention mask to the left
+        metric_labels = metric_labels[..., 1:]
+        attention_mask = attention_mask[..., 1:]
+        logits = logits[..., :-1, :]
+
+        predictions = torch.argmax(logits, dim=-1)
+
+        # Mask out the padding tokens
+        if attention_mask is None:
+            predictions = predictions * attention_mask
+            metric_labels = metric_labels * attention_mask
+
+        # Flatten the input and move to CPU
+        metric_labels = metric_labels.flatten().cpu()
+        predictions = predictions.flatten().cpu()
+        attention_mask = attention_mask.flatten().cpu()
+
+        metric_accuracy.add_batch(predictions=predictions, references=metric_labels)
+
+        del logits, metric_labels, predictions, attention_mask
+        torch.cuda.empty_cache()
+
+    if compute_result:
+        return {
+            "accuracy": metric_accuracy.compute()["accuracy"],
+        }
+    else:
+        return {}
+
+
 def main():
+    print("Processing command-line arguments")
     from transformers import HfArgumentParser
 
-    parser = HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
-    model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    parser = HfArgumentParser(
+        (ModelArguments, DataArguments, SFTConfig, WandbArguments)
+    )
+    model_args, data_args, training_args, wandb_args = (
+        parser.parse_args_into_dataclasses()
+    )
 
     # Prepare dataset
+    data_args.max_seq_length = training_args.max_seq_length
     datasets, tokenizer = prepare_dataset(data_args)
-    if data_args.streaming:
+    if data_args.streaming and not training_args.max_steps > 0:
         training_args.max_steps = (
             data_args.num_train_samples // training_args.per_device_train_batch_size
         )
+    training_args.include_inputs_for_metrics = True
 
     # Initialize model
+    print("Initializing model")
     config = get_model_config(model_args.model_size)
     # config._attn_implementation = "eager"
     config._attn_implementation = "flash_attention_2"
     # config._attn_implementation = "sdpa"
+    config.vocab_size = len(tokenizer)
     model = NeonForCausalLM(config)
-
-    # Initialize data collator
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=False,
+    model_num_params = sum(p.numel() for p in model.parameters())
+    model_num_params = (
+        f"{model_num_params / 1e6:.2f}M"
+        if model_num_params > 1e6
+        else f"{model_num_params / 1e9:.2f}B"
     )
+    print(f"Model has {model_num_params} parameters")
+
+    # Configure wandb logging
+    if "wandb" in training_args.report_to:
+        print("Configuring wandb logging")
+        import os
+
+        # set the wandb project where this run will be logged
+        os.environ["WANDB_PROJECT"] = wandb_args.project_name
+
+        # turn off watch to log faster
+        os.environ["WANDB_WATCH"] = wandb_args.watch
 
     # Initialize trainer
-    trainer = Trainer(
+    print("Initializing trainer")
+    trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
         args=training_args,
         train_dataset=datasets["train"],
         eval_dataset=datasets["test"],
-        data_collator=data_collator,
+        tokenizer=tokenizer,
+        compute_metrics=compute_metrics,
     )
 
     # Train the model
-    trainer.train()
-
-    # Save the model
-    trainer.save_model()
+    try:
+        print("Starting training")
+        trainer.train()
+    except KeyboardInterrupt:
+        print("Training interrupted")
+    finally:
+        print("Saving the model")
+        trainer.save_model()
 
 
 if __name__ == "__main__":
-    # Example usage:
-    # python train_neon.py \
-    #     --model_size spark \
-    #     --output_dir ./neon-test \
-    #     --num_train_epochs 3 \
-    #     --per_device_train_batch_size 4 \
-    #     --per_device_eval_batch_size 4 \
-    #     --logging_steps 10 \
-    #     --save_steps 50 \
-    #     --evaluation_strategy steps \
-    #     --eval_steps 50 \
-    #     --save_total_limit 2 \
-    #     --load_best_model_at_end True \
-    #     --num_train_samples 1000 \
-    #     --num_eval_samples 100
-
     main()
