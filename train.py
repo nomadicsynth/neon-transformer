@@ -37,14 +37,14 @@ class WandbArguments:
 
 def get_model_config(model_size: str) -> NeonConfig:
     """Get model configuration based on size variant."""
+    # `intermediate_size` should be 8/3 * `hidden_size`
     configs = {
         "spark": dict(
             hidden_size=512,
             num_hidden_layers=8,
-            num_attention_heads=8,
-            num_key_value_heads=8,
-            intermediate_size=2048,
-            head_dim=64,
+            num_attention_heads=4,
+            num_key_value_heads=4,
+            intermediate_size=1360,
         ),
         "glow": dict(
             hidden_size=768,
@@ -52,7 +52,6 @@ def get_model_config(model_size: str) -> NeonConfig:
             num_attention_heads=12,
             num_key_value_heads=12,
             intermediate_size=3072,
-            head_dim=64,
         ),
         "beam": dict(
             hidden_size=1024,
@@ -60,7 +59,6 @@ def get_model_config(model_size: str) -> NeonConfig:
             num_attention_heads=16,
             num_key_value_heads=16,
             intermediate_size=4096,
-            head_dim=64,
         ),
         "arc": dict(
             hidden_size=1536,
@@ -68,7 +66,6 @@ def get_model_config(model_size: str) -> NeonConfig:
             num_attention_heads=20,
             num_key_value_heads=20,
             intermediate_size=6144,
-            head_dim=64,
         ),
         "nova": dict(
             hidden_size=2048,
@@ -76,7 +73,6 @@ def get_model_config(model_size: str) -> NeonConfig:
             num_attention_heads=24,
             num_key_value_heads=24,
             intermediate_size=8192,
-            head_dim=64,
         ),
     }
 

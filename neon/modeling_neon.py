@@ -172,7 +172,7 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
 
 
 def lambda_init_fn(depth):
-    return 0.8 - 0.6 * math.exp(-0.3 * depth)
+    return 0.8 - 0.6 * math.exp(-0.3 * (depth + 1))
 
 
 # modified from transformers.models.mistral.modeling_mistral.MistralAttention
@@ -204,8 +204,7 @@ class NeonAttention(nn.Module):
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
 
         # Halve head_dim to accommodate paired attention matrices
-        self.head_dim = (config.head_dim // 2 if config.head_dim is not None 
-                        else config.hidden_size // config.num_attention_heads // 2)
+        self.head_dim = config.hidden_size // config.num_attention_heads // 2
         self.scaling = self.head_dim ** -0.5
 
         self.max_position_embeddings = config.max_position_embeddings
@@ -503,6 +502,7 @@ class NeonFlashAttention2(NeonAttention):
 
 
 # copied from transformers.models.mistral.modeling_mistral.MistralSdpaAttention
+# TODO(nomadicsynth): Update to support `DiffAttention`
 class NeonSdpaAttention(NeonAttention):
     """
     Neon attention module using torch.nn.functional.scaled_dot_product_attention. This module inherits from
