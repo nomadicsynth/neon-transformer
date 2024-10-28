@@ -195,6 +195,9 @@ def main():
         parser.parse_args_into_dataclasses()
     )
 
+    training_args.batch_eval_metrics = True
+    training_args.include_inputs_for_metrics = True
+
     # Prepare dataset
     data_args.max_seq_length = training_args.max_seq_length
     datasets, tokenizer = prepare_dataset(data_args)
@@ -202,7 +205,6 @@ def main():
         training_args.max_steps = (
             data_args.num_train_samples // training_args.per_device_train_batch_size
         )
-    training_args.include_inputs_for_metrics = True
 
     # Initialize model
     print("Initializing model")
