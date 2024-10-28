@@ -1,0 +1,5 @@
+bitsandbytes
+datasets
+evaluate
+scikit-learn
+transformers[torch]
