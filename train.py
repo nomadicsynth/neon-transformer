@@ -197,6 +197,8 @@ def main():
 
     training_args.batch_eval_metrics = True
     training_args.include_inputs_for_metrics = True
+    training_args.include_tokens_per_second = True
+    training_args.include_num_input_tokens_seen = True
 
     # Prepare dataset
     data_args.max_seq_length = training_args.max_seq_length
