@@ -1,5 +1,5 @@
 #!/bin/bash
-echo python train.py --output_dir ./outputs/spark-diffattn-expressive-baseline --overwrite_output_dir True \
+python train.py --output_dir ./outputs/spark-diffattn-expressive-baseline --overwrite_output_dir True \
                 --bf16 True --bf16_full_eval True \
                 --optim adamw_bnb_8bit --adam_beta1 0.9 --adam_beta2 0.98 \
                 --learning_rate 2e-4 --lr_scheduler_type linear --weight_decay 0.01 \
@@ -13,4 +13,4 @@ echo python train.py --output_dir ./outputs/spark-diffattn-expressive-baseline -
                 --streaming True --packing True --dataset_text_field text --dataloader_num_workers 2 \
                 --per_device_train_batch_size 8 --per_device_eval_batch_size 16 \
                 --max_seq_length 2048 --gradient_accumulation_steps 16 \
-                --seed 42 --diff_attention_mode expressive >> training_queue.txt
+                --seed 42 --diff_attention_mode expressive
