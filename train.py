@@ -211,6 +211,7 @@ def main():
     training_args.include_inputs_for_metrics = True
     training_args.include_tokens_per_second = True
     training_args.include_num_input_tokens_seen = True
+    training_args.dataset_text_field="text" if not training_args.dataset_text_field else training_args.dataset_text_field
 
     # Prepare dataset
     data_args.max_seq_length = training_args.max_seq_length
@@ -254,7 +255,6 @@ def main():
         args=training_args,
         train_dataset=datasets["train"],
         eval_dataset=datasets["test"],
-        dataset_text_field="text" if not training_args.dataset_text_field else training_args.dataset_text_field,
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
     )
