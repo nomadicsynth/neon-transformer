@@ -21,7 +21,10 @@ class ModelArguments:
     )
     diff_attention_mode: str = field(
         default="expressive",
-        metadata={"help": "DiffAttention mode to use. Can be either `expressive` or `constrained`."},
+        metadata={
+            "help": "DiffAttention mode to use. Can be either `expressive` or `constrained`.",
+            "choices": ["expressive", "constrained"],
+        },
     )
 
 
@@ -38,6 +41,7 @@ class DataArguments:
 class WandbArguments:
     project_name: str = field(default="neon-test", metadata={"help": "Name of the W&B project"})
     watch: str = field(default="false", metadata={"help": "Whether to watch the training", "choices": ["all", "gradients", "parameters", "false"]})
+    wandb_log_model: str = field(default="false", metadata={"help": "Whether to log the model", "choices": ["end", "checkpoint", "false"]})
 
 
 def get_model_config(args: ModelArguments) -> NeonConfig:
@@ -247,6 +251,9 @@ def main():
 
         # turn off watch to log faster
         os.environ["WANDB_WATCH"] = wandb_args.watch
+
+        # log the model
+        os.environ["WANDB_LOG_MODEL"] = wandb_args.log_model
 
     # Initialize trainer
     print("Initializing trainer")
