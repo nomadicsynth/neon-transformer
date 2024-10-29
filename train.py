@@ -253,7 +253,7 @@ def main():
         os.environ["WANDB_WATCH"] = wandb_args.watch
 
         # log the model
-        os.environ["WANDB_LOG_MODEL"] = wandb_args.log_model
+        os.environ["WANDB_LOG_MODEL"] = wandb_args.wandb_log_model
 
     # Initialize trainer
     print("Initializing trainer")
