@@ -8,6 +8,7 @@ from transformers import EvalPrediction
 from trl import SFTConfig, SFTTrainer
 
 from neon import NeonConfig, NeonForCausalLM
+from neon.configuration_neon import DiffAttentionMode
 
 
 @dataclass
@@ -18,15 +19,19 @@ class ModelArguments:
             "help": "Size variant of the model to train (spark, glow, beam, arc, nova)"
         },
     )
+    diff_attention_mode: str = field(
+        default="expressive",
+        metadata={"help": "DiffAttention mode to use. Can be either `expressive` or `constrained`."},
+    )
 
 
 @dataclass
 class DataArguments:
-    dataset_name: str = field(default="HuggingFaceFW/fineweb")
-    dataset_config_name: str = field(default="sample-10BT")
-    num_train_samples: int = field(default=1000)
-    num_eval_samples: int = field(default=100)
-    streaming: bool = field(default=True)
+    dataset_name: str = field(default="HuggingFaceFW/fineweb", metadata={"help": "Name of the dataset to use"})
+    dataset_config_name: str = field(default="sample-10BT", metadata={"help": "Name of the dataset configuration"})
+    num_train_samples: int = field(default=1000, metadata={"help": "Number of training samples"})
+    num_eval_samples: int = field(default=100, metadata={"help": "Number of evaluation samples"})
+    streaming: bool = field(default=True, metadata={"help": "Whether to use streaming mode"})
 
 
 @dataclass
@@ -35,8 +40,14 @@ class WandbArguments:
     watch: str = field(default="false", metadata={"help": "Whether to watch the training", "choices": ["all", "gradients", "parameters", "false"]})
 
 
-def get_model_config(model_size: str) -> NeonConfig:
+def get_model_config(args: ModelArguments) -> NeonConfig:
     """Get model configuration based on size variant."""
+
+    if args.diff_attention_mode not in ["expressive", "constrained"]:
+        raise ValueError(
+            f"Invalid diff_attention_mode: {args.diff_attention_mode}. Can be either `expressive` or `constrained`."
+        )
+
     # `intermediate_size` should be 8/3 * `hidden_size`
     configs = {
         "spark": dict(
@@ -76,9 +87,9 @@ def get_model_config(model_size: str) -> NeonConfig:
         ),
     }
 
-    if model_size not in configs:
+    if args.model_size not in configs:
         raise ValueError(
-            f"Model size {model_size} not supported. Choose from {list(configs.keys())}"
+            f"Model size {args.model_size} not supported. Choose from {list(configs.keys())}"
         )
 
     base_config = dict(
@@ -90,9 +101,10 @@ def get_model_config(model_size: str) -> NeonConfig:
         initializer_range=0.02,
         rope_theta=10000.0,
         tie_word_embeddings=True,
+        diff_attention_mode=DiffAttentionMode.EXPRESSIVE if args.diff_attention_mode == "expressive" else DiffAttentionMode.CONSTRAINED,
     )
 
-    config_dict = {**base_config, **configs[model_size]}
+    config_dict = {**base_config, **configs[args.model_size]}
     return NeonConfig(**config_dict)
 
 
@@ -210,7 +222,7 @@ def main():
 
     # Initialize model
     print("Initializing model")
-    config = get_model_config(model_args.model_size)
+    config = get_model_config(model_args)
     # config._attn_implementation = "eager"
     config._attn_implementation = "flash_attention_2"
     # config._attn_implementation = "sdpa"
@@ -242,6 +254,7 @@ def main():
         args=training_args,
         train_dataset=datasets["train"],
         eval_dataset=datasets["test"],
+        dataset_text_field="text" if not training_args.dataset_text_field else training_args.dataset_text_field,
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
     )

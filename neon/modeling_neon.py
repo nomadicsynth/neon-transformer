@@ -43,10 +43,9 @@ from transformers.utils import (add_start_docstrings,
                                 is_torchdynamo_compiling, logging,
                                 replace_return_docstrings)
 
-from neon.rotary import apply_rotary_emb
-
-from .configuration_neon import NeonConfig
+from .configuration_neon import DiffAttentionMode, NeonConfig
 from .rms_norm import RMSNorm
+from .rotary import apply_rotary_emb
 
 if is_flash_attn_2_available():
     from transformers.modeling_flash_attention_utils import \
@@ -203,21 +202,25 @@ class NeonAttention(nn.Module):
                                   else config.num_attention_heads)
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
 
-        # Halve head_dim to accommodate paired attention matrices
-        self.head_dim = config.hidden_size // config.num_attention_heads // 2
-        self.scaling = self.head_dim ** -0.5
+        self.diff_attention_mode = DiffAttentionMode(config.diff_attention_mode)
 
+        # Adjust head_dim and projection sizes based on mode
+        if self.diff_attention_mode == DiffAttentionMode.CONSTRAINED:
+            self.head_dim = config.hidden_size // config.num_attention_heads // 2
+            self.projection_size = self.hidden_size
+        else:  # EXPRESSIVE
+            self.head_dim = config.hidden_size // config.num_attention_heads
+            self.projection_size = self.hidden_size * 2
+
+        self.scaling = self.head_dim ** -0.5
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
         self.is_causal = True
 
-        # Projections need to account for paired attention matrices
-        # Q, K: Double width for pairs
-        # V: Same as K, will be reshaped to handle pairs
-        self.q_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
-        self.k_proj = nn.Linear(self.hidden_size, self.hidden_size // self.num_key_value_groups, bias=False)
-        self.v_proj = nn.Linear(self.hidden_size, self.hidden_size // self.num_key_value_groups, bias=False)
-        self.o_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
+        self.q_proj = nn.Linear(self.hidden_size, self.projection_size, bias=False)
+        self.k_proj = nn.Linear(self.hidden_size, self.projection_size // self.num_key_value_groups, bias=False)
+        self.v_proj = nn.Linear(self.hidden_size, self.projection_size // self.num_key_value_groups, bias=False)
+        self.o_proj = nn.Linear(self.projection_size, self.hidden_size, bias=False)
 
         # Initialize lambda parameters for differential attention
         self.lambda_init = lambda_init_fn(self.layer_idx)
