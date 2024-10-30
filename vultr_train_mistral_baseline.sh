@@ -44,7 +44,7 @@ docker run --gpus all \
     conda install -y pytorch pytorch-cuda=12.4 -c pytorch -c nvidia
     
     # Install flash-attention
-    conda install -y flash-attn>=2.6.0 -c conda-forge
+    conda install -y flash-attn==2.6.3 -c conda-forge
 
     # Container-level setup
     pip install -r requirements-env.txt
