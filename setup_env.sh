@@ -14,8 +14,9 @@ cd neon-transformer
 python3 -m pip install -r requirements-env.txt
 python3 -m pip install -r requirements-app.txt
 
-# Set up wandb
+# Set up wandb and huggingface
 wandb login
+huggingface-cli login
 
 # Run!
 model_sizes=("2s", "4s", "8s")
