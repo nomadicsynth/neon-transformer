@@ -13,7 +13,7 @@ model_size=$1
 docker pull nvcr.io/nvidia/pytorch:23.12-py3
 
 # System-level setup that persists outside container
-apt update && apt install -y python3-pip git python3.12-venv
+apt update && apt install -y python3-pip git python3-venv
 
 # Clone repo (do this outside container)
 git clone https://github.com/nomadicsynth/neon-transformer.git
