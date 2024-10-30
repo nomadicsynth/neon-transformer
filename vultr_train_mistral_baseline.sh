@@ -29,13 +29,27 @@ docker run --gpus all \
     -w /workspace \
     -e WANDB_API_KEY="${wandb_key}" \
     -e HUGGING_FACE_HUB_TOKEN="${hf_key}" \
-    -e PIP_REQUIRE_VIRTUALENV=false \
     --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 \
     --rm nvcr.io/nvidia/pytorch:24.10-py3 bash -c "
+    # Install conda
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+    bash miniconda.sh -b -p /opt/conda
+    eval \"\$(/opt/conda/bin/conda shell.bash hook)\"
+    
+    # Create and activate conda environment
+    conda create -n neon python=3.12 -y
+    conda activate neon
+    
+    # Install pytorch with CUDA
+    conda install -y pytorch pytorch-cuda=12.6 -c pytorch -c nvidia
+    
+    # Install flash-attention
+    conda install -y flash-attn -c conda-forge
+
     # Container-level setup
     pip install -r requirements-env.txt
     pip install -r requirements-frozen.txt
-    pip install flash-attn==2.6.3 --no-build-isolation
+    # pip install flash-attn==2.6.3 --no-build-isolation
 
     # Run training
     python train_mistral_baseline.py \
