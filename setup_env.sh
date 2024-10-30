@@ -1,6 +1,6 @@
 #!/bin/bash
 # System stuff
-apt update && apt install -y python3-pip git
+apt update && apt install -y python3-pip git python3.12-venv
 
 # Create a venv
 python3 -m venv .venv
