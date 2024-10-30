@@ -2,7 +2,8 @@ bitsandbytes
 datasets
 evaluate
 scikit-learn
-transformers[torch]
+transformers
+torch
 wandb
 trl
-flash_attn
+# flash_attn
