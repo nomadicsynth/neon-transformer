@@ -31,7 +31,7 @@ docker run --gpus all \
     -e HUGGING_FACE_HUB_TOKEN="${hf_key}" \
     -e PIP_REQUIRE_VIRTUALENV=false \
     --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 \
-    --rm nvcr.io/nvidia/pytorch:23.12-py3 bash -c "
+    --rm nvcr.io/nvidia/pytorch:24.10-py3 bash -c "
     # Container-level setup
     pip install -r requirements-env.txt
     pip install -U -r requirements-app.txt
