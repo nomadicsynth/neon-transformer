@@ -65,8 +65,8 @@ docker run --gpus all \
         --dataset_name HuggingFaceFW/fineweb --dataset_config_name sample-10BT \
         --num_train_samples 0 --num_eval_samples 5000 \
         --streaming True --packing True --dataloader_num_workers 2 \
-        --per_device_train_batch_size 16 --per_device_eval_batch_size 16 \
-        --max_seq_length 2048 --gradient_accumulation_steps 8 \
+        --per_device_train_batch_size 32 --per_device_eval_batch_size 16 \
+        --max_seq_length 2048 --gradient_accumulation_steps 4 \
         --seed 42 --model_size '${model_size}'
 "
 
