@@ -2,6 +2,10 @@
 # System stuff
 apt update && apt install -y python3-pip git
 
+# Create a venv
+python3 -m venv .venv
+source .venv/bin/activate
+
 # Clone your repo
 git clone https://github.com/nomadicsynth/neon-transformer.git
 cd neon-transformer
