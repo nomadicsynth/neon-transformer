@@ -1,9 +1,9 @@
-bitsandbytes
-datasets
-evaluate
-scikit-learn
-transformers
-# torch
-wandb
-trl
 # flash_attn
+# torch
+bitsandbytes==0.44.1
+datasets==3.0.2
+evaluate==0.4.3
+scikit-learn==1.5.2
+transformers==4.45.2
+trl==0.11.4
+wandb==0.18.5
