@@ -41,7 +41,7 @@ docker run --gpus all \
     conda activate neon
     
     # Install pytorch with CUDA
-    conda install -y pytorch pytorch-cuda=12.6 -c pytorch -c nvidia
+    conda install -y pytorch pytorch-cuda=12.4 -c pytorch -c nvidia
     
     # Install flash-attention
     conda install -y flash-attn -c conda-forge
