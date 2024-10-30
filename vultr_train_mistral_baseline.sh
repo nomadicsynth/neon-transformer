@@ -12,7 +12,7 @@ wandb_key=$2
 hf_key=$3
 
 # Pull NVIDIA PyTorch container
-docker pull nvcr.io/nvidia/pytorch:23.12-py3
+docker pull nvcr.io/nvidia/pytorch:24.10-py3
 
 # System-level setup that persists outside container
 apt update && apt install -y python3-pip git
