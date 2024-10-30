@@ -25,9 +25,11 @@ echo "Starting training for model size: ${model_size}"
 docker run --gpus all -v $(pwd):/workspace -w /workspace --rm nvcr.io/nvidia/pytorch:23.12-py3 bash -c "
     # Container-level setup
     # Create a venv
-    python3 -m venv .venv
-    source .venv/bin/activate
+    # python3 -m venv .venv
+    # source .venv/bin/activate
 
+    PIP_REQUIRE_VIRTUALENV=false
+    
     pip install -r requirements-env.txt
     pip install -r requirements-app.txt
     pip install flash-attn --no-build-isolation
