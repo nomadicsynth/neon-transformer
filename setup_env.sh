@@ -19,7 +19,7 @@ wandb login
 huggingface-cli login
 
 # Run!
-model_sizes=("2s", "4s", "8s")
+model_sizes=(2s 4s 8s)
 for model_size in "${model_sizes[@]}"; do
     python train_mistral_baseline.py \
                     --output_dir "./outputs/mistral-${model_size}-baseline" --overwrite_output_dir True \
