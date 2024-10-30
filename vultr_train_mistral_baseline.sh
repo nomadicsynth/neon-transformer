@@ -48,8 +48,7 @@ docker run --gpus all \
 
     # Container-level setup
     pip install -r requirements-env.txt
-    pip install -r requirements-frozen.txt
-    # pip install flash-attn==2.6.3 --no-build-isolation
+    pip install -r requirements-app.txt
 
     # Run training
     python train_mistral_baseline.py \
