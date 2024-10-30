@@ -13,7 +13,7 @@ model_size=$1
 docker pull nvcr.io/nvidia/pytorch:23.12-py3
 
 # System-level setup that persists outside container
-apt update && apt install -y python3-pip git
+apt update && apt install -y python3-pip git python3.12-venv
 
 # Clone repo (do this outside container)
 git clone https://github.com/nomadicsynth/neon-transformer.git
@@ -24,6 +24,10 @@ echo "Starting training for model size: ${model_size}"
 # Run training in container
 docker run --gpus all -v $(pwd):/workspace -w /workspace --rm nvcr.io/nvidia/pytorch:23.12-py3 bash -c "
     # Container-level setup
+    # Create a venv
+    python3 -m venv .venv
+    source .venv/bin/activate
+
     pip install -r requirements-env.txt
     pip install -r requirements-app.txt
     pip install flash-attn --no-build-isolation
