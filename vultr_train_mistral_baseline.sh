@@ -28,6 +28,7 @@ docker run --gpus all \
     -v $(pwd):/workspace \
     -w /workspace \
     -e WANDB_API_KEY="${wandb_key}" \
+    -e PIP_REQUIRE_VIRTUALENV=false \
     -e HUGGING_FACE_HUB_TOKEN="${hf_key}" \
     --rm nvcr.io/nvidia/pytorch:23.12-py3 bash -c "
     # Container-level setup
