@@ -30,6 +30,7 @@ docker run --gpus all \
     -e WANDB_API_KEY="${wandb_key}" \
     -e PIP_REQUIRE_VIRTUALENV=false \
     -e HUGGING_FACE_HUB_TOKEN="${hf_key}" \
+    --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 \
     --rm nvcr.io/nvidia/pytorch:23.12-py3 bash -c "
     # Container-level setup
     pip install -r requirements-env.txt
