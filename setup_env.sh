@@ -21,7 +21,8 @@ huggingface-cli login
 # Run!
 model_sizes=("2s", "4s", "8s")
 for model_size in "${model_sizes[@]}"; do
-    python train.py --output_dir "./outputs/mistral-${model_size}-baseline" --overwrite_output_dir True \
+    python train_mistral_baseline.py \
+                    --output_dir "./outputs/mistral-${model_size}-baseline" --overwrite_output_dir True \
                     --bf16 True --bf16_full_eval True \
                     --optim adamw_bnb_8bit --adam_beta1 0.9 --adam_beta2 0.98 \
                     --learning_rate 3.2e-4 --lr_scheduler_type cosine --weight_decay 0.01 \
