@@ -3,3 +3,6 @@ datasets
 evaluate
 scikit-learn
 transformers[torch]
+wandb
+trl
+flash_attn
