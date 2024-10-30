@@ -11,8 +11,9 @@ git clone https://github.com/nomadicsynth/neon-transformer.git
 cd neon-transformer
 
 # Set up Python environment
-python3 -m pip install -r requirements-env.txt
-python3 -m pip install -r requirements-app.txt
+pip install -r requirements-env.txt
+pip install -r requirements-app.txt
+pip install flash-attn --no-build-isolation
 
 # Set up wandb and huggingface
 wandb login
