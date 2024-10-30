@@ -33,8 +33,8 @@ docker run --gpus all \
     --rm nvcr.io/nvidia/pytorch:23.12-py3 bash -c "
     # Container-level setup
     pip install -r requirements-env.txt
-    pip install -r requirements-app.txt
-    pip install -U flash-attn --no-build-isolation
+    pip install -U -r requirements-app.txt
+    pip install -U flash-attn>=2.1.0 --no-build-isolation
 
     # Run training
     python train_mistral_baseline.py \
