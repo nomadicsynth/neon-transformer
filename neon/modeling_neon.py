@@ -181,16 +181,10 @@ class NeonAttention(nn.Module):
     Also includes sliding window attention from Longformer and Sparse Transformers.
     """
 
-    def __init__(self, config: NeonConfig, layer_idx: Optional[int] = None):
+    def __init__(self, config: NeonConfig, layer_idx: int):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
-        if layer_idx is None:
-            logger.warning_once(
-                f"Instantiating {self.__class__.__name__} without passing a `layer_idx` is not recommended and will "
-                "lead to errors during the forward call if caching is used. Please make sure to provide a `layer_idx` "
-                "when creating this class."
-            )
 
         self.attention_dropout = config.attention_dropout
         self.hidden_size = config.hidden_size
