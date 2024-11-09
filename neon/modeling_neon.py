@@ -142,19 +142,76 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
+
+def lambda_init_fn(depth):
+    return 0.8 - 0.6 * math.exp(-0.3 * (depth + 1))
+
+
 # copied from transformers.models.mistral.modeling_mistral.MistralMLP
+# modified to test differential amplification/noise reduction similar to DiffAttention
 class NeonMLP(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, layer_idx: int):
         super().__init__()
+        self.config = config
+        self.layer_idx = layer_idx
+
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
-        self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
-        self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
+
+        self.diff_mlp = config.diff_mlp
+
+        # First stream
+        self.gate_proj1 = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
+        self.up_proj1 = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
+
+        if self.diff_mlp:
+            # Second stream
+            self.gate_proj2 = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
+            self.up_proj2 = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
+
+        # Shared down projection
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
+
+        # Activation function
         self.act_fn = ACT2FN[config.hidden_act]
 
-    def forward(self, hidden_state):
-        return self.down_proj(self.act_fn(self.gate_proj(hidden_state)) * self.up_proj(hidden_state))
+        if self.diff_mlp:
+            # Lambda parameters for noise profile learning
+            self.lambda_init = lambda_init_fn(self.layer_idx)
+            self.lambda_g1 = nn.Parameter(torch.randn(self.intermediate_size))
+            self.lambda_u1 = nn.Parameter(torch.randn(self.intermediate_size))
+            self.lambda_g2 = nn.Parameter(torch.randn(self.intermediate_size))
+            self.lambda_u2 = nn.Parameter(torch.randn(self.intermediate_size))
+
+            # Layer norm
+            self.subln = nn.LayerNorm(self.hidden_size)
+
+    def forward(self, hidden_states):
+        # First stream
+        gate1 = self.gate_proj1(hidden_states)
+        up1 = self.up_proj1(hidden_states)
+        hidden1 = self.act_fn(gate1) * up1
+
+        if self.diff_mlp:
+            # Second stream
+            gate2 = self.gate_proj2(hidden_states)
+            up2 = self.up_proj2(hidden_states)
+            hidden2 = self.act_fn(gate2) * up2
+
+            # Compute dynamic scaling factor
+            lambda_1 = torch.exp(torch.sum(self.lambda_g1 * self.lambda_u1, dim=-1).float()).type_as(hidden_states)
+            lambda_2 = torch.exp(torch.sum(self.lambda_g2 * self.lambda_u2, dim=-1).float()).type_as(hidden_states)
+            lambda_full = lambda_1 - lambda_2 + self.lambda_init
+
+            # Combine streams with noise subtraction
+            hidden_diff = hidden1 - lambda_full * hidden2
+            out = self.down_proj(hidden_diff)
+            out = self.subln(out)
+
+            return out * (1 - self.lambda_init)
+        else:
+            out = self.down_proj(hidden_diff)
+            return out
 
 
 # Copied from transformers.models.llama.modeling_llama.repeat_kv
@@ -170,11 +227,8 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
-def lambda_init_fn(depth):
-    return 0.8 - 0.6 * math.exp(-0.3 * (depth + 1))
-
-
-# modified from transformers.models.mistral.modeling_mistral.MistralAttention
+# Copied from transformers.models.mistral.modeling_mistral.MistralAttention
+# Modified to support DiffAttention
 class NeonAttention(nn.Module):
     """
     Multi-headed attention incorporating differential attention mechanism from the DIFF Transformer paper.
@@ -316,7 +370,8 @@ class NeonAttention(nn.Module):
         return attn_output, attn_weights, past_key_value
 
 
-# copied from transformers.models.mistral.modeling_mistral.MistralFlashAttention2
+# Copied from transformers.models.mistral.modeling_mistral.MistralFlashAttention2
+# Modified to support DiffAttention
 class NeonFlashAttention2(NeonAttention):
     """
     Neon flash attention module. This module inherits from `NeonAttention` as the weights of the module stays
@@ -603,7 +658,7 @@ class NeonDecoderLayer(nn.Module):
 
         self.self_attn = NEON_ATTENTION_CLASSES[config._attn_implementation](config=config, layer_idx=layer_idx)
 
-        self.mlp = NeonMLP(config)
+        self.mlp = NeonMLP(config=config, layer_idx=layer_idx)
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
 

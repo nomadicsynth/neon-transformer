@@ -89,8 +89,10 @@ class NeonConfig(PretrainedConfig):
                 sliding window attention.
             attention_dropout (`float`, *optional*, defaults to 0.0):
                 The dropout ratio for the attention probabilities.
-            diff_attention_mode: (`DiffAttentionMode`, *optional*, defaults to `DiffAttentionMode.CONSTRAINED`):
+            diff_attention_mode (`DiffAttentionMode`, *optional*, defaults to `DiffAttentionMode.CONSTRAINED`):
                 The mode for differential attention: `CONSTRAINED` (reference) or `EXPRESSIVE` (paper).
+            diff_mlp (`bool`, *optional*, defaults to `True`):
+                Whether to use a different MLP for each attention head.
     )
 
 
@@ -132,6 +134,7 @@ class NeonConfig(PretrainedConfig):
         sliding_window=None,
         attention_dropout=0.0,
         diff_attention_mode: DiffAttentionMode = DiffAttentionMode.CONSTRAINED,
+        diff_mlp=True,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -142,6 +145,7 @@ class NeonConfig(PretrainedConfig):
         self.num_attention_heads = num_attention_heads
         self.sliding_window = sliding_window
         self.diff_attention_mode = diff_attention_mode
+        self.diff_mlp = diff_mlp
         self.head_dim = head_dim or hidden_size // num_attention_heads
 
         # for backward compatibility
