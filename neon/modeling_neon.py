@@ -237,7 +237,6 @@ class NeonAttention(nn.Module):
 
     def __init__(self, config: NeonConfig, layer_idx: int):
         super().__init__()
-        self.config = config
         self.layer_idx = layer_idx
 
         self.attention_dropout = config.attention_dropout
