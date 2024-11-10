@@ -10,6 +10,16 @@
         <mxCell id="7ALhebWWjywCs4MrrUen-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="3" target="4" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
+        <mxCell id="yzHuR-fKHhVG8IjJjYtu-54" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=default;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=11;fontColor=default;labelBackgroundColor=default;endArrow=none;endFill=0;" edge="1" parent="1" source="3" target="4">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="300" y="1060" />
+              <mxPoint x="430" y="1060" />
+              <mxPoint x="430" y="860" />
+              <mxPoint x="300" y="860" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
         <mxCell id="3" value="Layer Norm" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#000000;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=12;fontColor=default;" parent="1" vertex="1">
           <mxGeometry x="250" y="1000" width="100" height="40" as="geometry" />
         </mxCell>
@@ -24,6 +34,16 @@
         </mxCell>
         <mxCell id="yzHuR-fKHhVG8IjJjYtu-25" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="5" target="yzHuR-fKHhVG8IjJjYtu-20">
           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="yzHuR-fKHhVG8IjJjYtu-53" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=default;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=11;fontColor=default;labelBackgroundColor=default;endArrow=none;endFill=0;" edge="1" parent="1" source="5" target="8">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="300" y="860" />
+              <mxPoint x="-60" y="860" />
+              <mxPoint x="-60" y="340" />
+              <mxPoint x="300" y="340" />
+            </Array>
+          </mxGeometry>
         </mxCell>
         <mxCell id="5" value="Layer Norm" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#000000;" parent="1" vertex="1">
           <mxGeometry x="250" y="800" width="100" height="40" as="geometry" />
