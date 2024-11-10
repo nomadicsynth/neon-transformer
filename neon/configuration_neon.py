@@ -93,6 +93,10 @@ class NeonConfig(PretrainedConfig):
                 The mode for differential attention: `CONSTRAINED` (reference) or `EXPRESSIVE` (paper).
             diff_mlp (`bool`, *optional*, defaults to `False`):
                 Whether to use a different MLP for each attention head.
+            num_global_memories (`int`, *optional*, defaults to 32):
+                The number of global memories.
+            num_layer_memories (`int`, *optional*, defaults to 16):
+                The number of layer-local memories.
     )
 
 
@@ -135,6 +139,8 @@ class NeonConfig(PretrainedConfig):
         attention_dropout=0.0,
         diff_attention_mode: DiffAttentionMode = DiffAttentionMode.EXPRESSIVE,
         diff_mlp=False,
+        num_global_memories=32,
+        num_layer_memories=16,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -146,6 +152,8 @@ class NeonConfig(PretrainedConfig):
         self.sliding_window = sliding_window
         self.diff_attention_mode = diff_attention_mode
         self.diff_mlp = diff_mlp
+        self.num_global_memories = num_global_memories
+        self.num_layer_memories = num_layer_memories
         self.head_dim = head_dim or hidden_size // num_attention_heads
 
         # for backward compatibility
