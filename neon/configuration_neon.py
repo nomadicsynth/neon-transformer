@@ -136,7 +136,6 @@ class NeonConfig(PretrainedConfig):
         diff_attention_mode: DiffAttentionMode = DiffAttentionMode.CONSTRAINED,
         diff_mlp=False,
         **kwargs,
-        **kwargs,
     ):
         self.vocab_size = vocab_size
         self.max_position_embeddings = max_position_embeddings
