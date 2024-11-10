@@ -134,7 +134,8 @@ class NeonConfig(PretrainedConfig):
         sliding_window=None,
         attention_dropout=0.0,
         diff_attention_mode: DiffAttentionMode = DiffAttentionMode.CONSTRAINED,
-        diff_mlp=True,
+        diff_mlp=False,
+        **kwargs,
         **kwargs,
     ):
         self.vocab_size = vocab_size
