@@ -105,7 +105,7 @@ def get_model_config(args: ModelArguments) -> NeonConfig:
         initializer_range=0.02,
         rope_theta=10000.0,
         tie_word_embeddings=True,
-        diff_attention_mode=DiffAttentionMode.EXPRESSIVE if args.diff_attention_mode == "expressive" else DiffAttentionMode.CONSTRAINED,
+        diff_attention_mode=DiffAttentionMode.CONSTRAINED if args.diff_attention_mode == "constrained" else DiffAttentionMode.EXPRESSIVE,
     )
 
     config_dict = {**base_config, **configs[args.model_size]}

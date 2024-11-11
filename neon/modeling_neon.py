@@ -812,6 +812,11 @@ class NeonPreTrainedModel(PreTrainedModel):
             module.weight.data.normal_(mean=0.0, std=std)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, (NeonModel, NeonDecoderLayer)):
+            memory_std = self.config.memory_initializer_range
+            for name, param in module.named_parameters():
+                if "memories" in name:
+                    param.data.normal_(mean=0.0, std=memory_std)
 
 
 NEON_INPUTS_DOCSTRING = r"""
