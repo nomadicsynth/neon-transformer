@@ -656,6 +656,8 @@ class NeonDecoderLayer(nn.Module):
     def __init__(self, config: NeonConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
+        self.use_global_memories = config.num_global_memories > 0
+        self.use_layer_memories = config.num_layer_memories > 0
 
         self.self_attn = NEON_ATTENTION_CLASSES[config._attn_implementation](config=config, layer_idx=layer_idx)
         self.mlp = NeonMLP(config=config, layer_idx=layer_idx)
@@ -663,23 +665,30 @@ class NeonDecoderLayer(nn.Module):
         # Global memory query
         # Global memories are passed directly into forward instead of being passed into here to avoid
         # errors from Safetensors about shared tensors.
-        self.global_query = nn.Linear(self.hidden_size, config.num_global_memories, bias=False)
+        if self.use_global_memories:
+            self.global_query = nn.Linear(self.hidden_size, config.num_global_memories, bias=False)
 
         # Layer-specific memory
-        self.num_layer_memories = config.num_layer_memories
-        self.layer_memories = nn.Parameter(torch.randn(self.num_layer_memories, self.hidden_size))
-        self.layer_query = nn.Linear(self.hidden_size, self.num_layer_memories, bias=False)
+        if self.use_layer_memories:
+            self.num_layer_memories = config.num_layer_memories
+            self.layer_memories = nn.Parameter(torch.randn(self.num_layer_memories, self.hidden_size))
+            self.layer_query = nn.Linear(self.hidden_size, self.num_layer_memories, bias=False)
 
-        # Optional: learned mixing of global vs layer memories
-        self.memory_mix = nn.Parameter(torch.ones(2))
+        # Memory mixing
+        if self.use_global_memories and self.use_layer_memories:
+            self.memory_mix = nn.Parameter(torch.ones(2))
+            self.memory_mix.data.fill_(0.5)
+        elif self.use_global_memories or self.use_layer_memories:
+            self.memory_mix = nn.Parameter(torch.ones(1))
 
         # Layer norms
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
-        self.post_memory_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
+        if self.use_global_memories or self.use_layer_memories:
+            self.post_memory_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
 
     def memory_lookup(self, x: torch.Tensor, global_memories: nn.Parameter = None) -> torch.Tensor:
-        if global_memories is not None:
+        if self.use_global_memories and self.use_layer_memories:
             global_weights = nn.functional.softmax(self.global_query(x), dim=-1)
             layer_weights = nn.functional.softmax(self.layer_query(x), dim=-1)
 
@@ -689,11 +698,12 @@ class NeonDecoderLayer(nn.Module):
             # Combine both with learned mixing
             mix = nn.functional.softmax(self.memory_mix, dim=0)
             return global_context * mix[0] + layer_context * mix[1]
-        else:
+        elif self.use_global_memories:
+            global_weights = nn.functional.softmax(self.global_query(x), dim=-1)
+            return torch.matmul(global_weights, global_memories) * mix[0]
+        elif self.use_layer_memories:
             layer_weights = nn.functional.softmax(self.layer_query(x), dim=-1)
-            layer_context = torch.matmul(layer_weights, self.layer_memories)
-            return layer_context
-
+            return torch.matmul(layer_weights, self.layer_memories) * mix[0]
 
     def forward(
         self,
@@ -746,15 +756,19 @@ class NeonDecoderLayer(nn.Module):
         hidden_states = residual + hidden_states
 
         # Dual memories
-        residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
-        memory_context = self.memory_lookup(hidden_states, global_memories)
-        hidden_states = hidden_states + memory_context
-        hidden_states = residual + hidden_states
+        if self.use_global_memories or self.use_layer_memories:
+            residual = hidden_states
+            hidden_states = self.post_attention_layernorm(hidden_states)
+            memory_context = self.memory_lookup(hidden_states, global_memories)
+            hidden_states = hidden_states + memory_context
+            hidden_states = residual + hidden_states
 
         # Fully Connected
         residual = hidden_states
-        hidden_states = self.post_memory_layernorm(hidden_states)
+        if self.use_global_memories or self.use_layer_memories:
+            hidden_states = self.post_memory_layernorm(hidden_states)
+        else:
+            hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
@@ -908,7 +922,10 @@ class NeonModel(NeonPreTrainedModel):
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
-        self.global_memories = nn.Parameter(torch.randn(config.num_global_memories, config.hidden_size))
+        if config.num_global_memories > 0:
+            self.global_memories = nn.Parameter(torch.randn(config.num_global_memories, config.hidden_size))
+        else:
+            self.global_memories = None
         self.layers = nn.ModuleList(
             [NeonDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )

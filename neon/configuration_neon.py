@@ -23,6 +23,7 @@ logger = logging.get_logger(__name__)
 
 
 class DiffAttentionMode(str, Enum):
+    NONE = "none"  # Disabled
     CONSTRAINED = "constrained"  # Reference implementation, halved head_dim
     EXPRESSIVE = "expressive"  # Paper implementation, full vector space
 
@@ -90,13 +91,13 @@ class NeonConfig(PretrainedConfig):
             attention_dropout (`float`, *optional*, defaults to 0.0):
                 The dropout ratio for the attention probabilities.
             diff_attention_mode (`DiffAttentionMode`, *optional*, defaults to `DiffAttentionMode.EXPRESSIVE`):
-                The mode for differential attention: `CONSTRAINED` (reference) or `EXPRESSIVE` (paper).
+                The mode for differential attention: `CONSTRAINED` (reference) or `EXPRESSIVE` (paper). `NONE` disables
             diff_mlp (`bool`, *optional*, defaults to `False`):
-                Whether to use a different MLP for each attention head.
-            num_global_memories (`int`, *optional*, defaults to 32):
-                The number of global memories.
-            num_layer_memories (`int`, *optional*, defaults to 16):
-                The number of layer-local memories.
+                Whether to use differential noise-reduction in the MLP.
+            num_global_memories (`int`, *optional*, defaults to 0):
+                The number of global memories. 0 disables global memories.
+            num_layer_memories (`int`, *optional*, defaults to 0):
+                The number of layer-local memories. 0 disables layer-local memories.
     )
 
 
@@ -139,8 +140,8 @@ class NeonConfig(PretrainedConfig):
         attention_dropout=0.0,
         diff_attention_mode: DiffAttentionMode = DiffAttentionMode.EXPRESSIVE,
         diff_mlp=False,
-        num_global_memories=32,
-        num_layer_memories=16,
+        num_global_memories=0,
+        num_layer_memories=0,
         **kwargs,
     ):
         self.vocab_size = vocab_size
