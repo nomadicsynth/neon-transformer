@@ -98,7 +98,7 @@ def get_model_config(args: ModelArguments) -> NeonConfig:
             num_hidden_layers=4,
             num_attention_heads=4,
             num_key_value_heads=4,
-            intermediate_size=512,
+            intermediate_size=680,
             max_position_embeddings=128,
         ),
         "spark": dict(
@@ -219,7 +219,10 @@ def compute_metrics(eval_pred: EvalPrediction, compute_result=False):
         # Get the logits, attention mask, and labels
         logits = eval_pred.predictions.detach()
         metric_labels = eval_pred.label_ids.detach()
-        attention_mask = eval_pred.inputs["attention_mask"].detach()
+        if hasattr(eval_pred.inputs, "attention_mask"):
+            attention_mask = eval_pred.inputs["attention_mask"].detach()
+        else:
+            attention_mask = None
 
         # Shift the labels and attention mask to the left
         metric_labels = metric_labels[..., 1:]
@@ -409,6 +412,27 @@ def main():
         parser.parse_args_into_dataclasses()
     )
 
+    # Configure wandb logging
+    if "wandb" in training_args.report_to:
+        print("Configuring wandb logging")
+        import os
+
+        # set the wandb project where this run will be logged
+        os.environ["WANDB_PROJECT"] = wandb_args.project_name
+
+        # turn off watch to log faster
+        os.environ["WANDB_WATCH"] = wandb_args.watch
+
+        # log the model
+        os.environ["WANDB_LOG_MODEL"] = wandb_args.wandb_log_model
+
+        # Update run name to include key hyperparameters
+        run_name = f"lr{training_args.learning_rate:.2e}_gm{model_args.num_global_memories}_lm{model_args.num_layer_memories}"
+        if not hasattr(training_args, "run_name") or not training_args.run_name:
+            training_args.run_name = run_name
+        else:
+            training_args.run_name = f"{training_args.run_name}_{run_name}"
+
     training_args.batch_eval_metrics = True
     training_args.include_inputs_for_metrics = True
     training_args.include_tokens_per_second = True
@@ -445,20 +469,6 @@ def main():
         else f"{model_num_params / 1e9:.2f}B"
     )
     print(f"Model has {model_num_params} parameters")
-
-    # Configure wandb logging
-    if "wandb" in training_args.report_to:
-        print("Configuring wandb logging")
-        import os
-
-        # set the wandb project where this run will be logged
-        os.environ["WANDB_PROJECT"] = wandb_args.project_name
-
-        # turn off watch to log faster
-        os.environ["WANDB_WATCH"] = wandb_args.watch
-
-        # log the model
-        os.environ["WANDB_LOG_MODEL"] = wandb_args.wandb_log_model
 
     # Initialize trainer
     print("Initializing trainer")

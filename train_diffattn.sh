@@ -2,7 +2,7 @@
 python train.py --output_dir "./outputs/test-diffattn" --overwrite_output_dir True \
                 --model_size test --bf16 True --bf16_full_eval True \
                 --optim adamw_bnb_8bit --adam_beta1 0.9 --adam_beta2 0.98 \
-                --learning_rate 4.2e-4 --lr_scheduler_type cosine --weight_decay 0.01 \
+                --learning_rate 3.2e-4 --lr_scheduler_type cosine --weight_decay 0.01 \
                 --max_steps 40000 --warmup_steps 500 \
                 --logging_strategy steps --logging_steps 100 \
                 --report_to wandb --watch all --wandb_log_model "end" \
