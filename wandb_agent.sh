@@ -45,6 +45,8 @@ sudo docker run --runtime=nvidia \
     pip install -r requirements-env.txt
     pip install -r requirements-app.txt
 
+    git config --global --add safe.directory /workspace
+
     # Run Agent
     wandb agent neon-cortex/neon-test/${sweep_id}
 "
