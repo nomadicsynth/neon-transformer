@@ -1,7 +1,7 @@
 #!/bin/bash
 
 if [ $# -ne 3 ]; then
-    echo "Usage: $0 <sweep_id> <wandb_key> <hf_key>"
+    echo "Usage: $0 <wandb_sweep_id> <wandb_key> <hf_key>"
     exit 1
 fi
 
