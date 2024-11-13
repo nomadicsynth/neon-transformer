@@ -305,7 +305,7 @@ class MemoryVisualizerCallback(TrainerCallback):
 
             # Save and log videos
             if videos:
-                self._save_and_log_videos({"global": global_video, **layer_videos})
+                self._save_and_log_videos(videos)
 
     def _create_memory_animation(self, history, title):
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
