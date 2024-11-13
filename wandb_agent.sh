@@ -26,7 +26,7 @@ sudo docker run --runtime=nvidia \
     -v $(pwd):/workspace \
     -w /workspace \
     -e WANDB_API_KEY="${wandb_key}" \
-    -e HUGGING_FACE_HUB_TOKEN="${hf_key}" \
+    -e HF_TOKEN="${hf_key}" \
     --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 \
     --rm nvcr.io/nvidia/pytorch:24.10-py3 bash -c "
     # Install conda
