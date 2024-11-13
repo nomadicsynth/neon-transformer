@@ -700,10 +700,10 @@ class NeonDecoderLayer(nn.Module):
             return global_context * mix[0] + layer_context * mix[1]
         elif self.use_global_memories:
             global_weights = nn.functional.softmax(self.global_query(x), dim=-1)
-            return torch.matmul(global_weights, global_memories) * mix
+            return torch.matmul(global_weights, global_memories)
         elif self.use_layer_memories:
             layer_weights = nn.functional.softmax(self.layer_query(x), dim=-1)
-            return torch.matmul(layer_weights, self.layer_memories) * mix
+            return torch.matmul(layer_weights, self.layer_memories)
 
     def forward(
         self,
