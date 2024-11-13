@@ -3,7 +3,9 @@ method: bayes
 metric:
   name: eval/accuracy
   goal: maximize
+
 parameters:
+  # Sweep parameters
   learning_rate:
     distribution: log_uniform_values
     min: 1e-4
@@ -14,47 +16,83 @@ parameters:
   num_layer_memories:
     distribution: categorical
     values: [0, 4, 8, 12, 16, 24, 32, 40, 48, 56, 64]
-  
-# Fixed parameters that should be the same for all runs
-command:
-  - python
-  - ${program}
-  - --output_dir=./outputs/sweep
-  - --overwrite_output_dir=True
-  - --project_name=neon-test
-  - --run_name=sweep
-  - --model_size=test
-  - --bf16=True
-  - --bf16_full_eval=True
-  - --optim=adamw_bnb_8bit
-  - --adam_beta1=0.9
-  - --adam_beta2=0.98
-  - --lr_scheduler_type=cosine
-  - --weight_decay=0.01
-  - --max_steps=40000
-  - --warmup_steps=500
-  - --logging_strategy=steps
-  - --logging_steps=100
-  - --report_to=wandb
-  - --watch=all
-  - --wandb_log_model=end
-  - --eval_strategy=steps
-  - --eval_steps=200
-  - --eval_on_start=True
-  - --save_strategy=steps
-  - --save_steps=200
-  - --save_total_limit=10
-  - --load_best_model_at_end=True
-  - --dataset_name=HuggingFaceFW/fineweb
-  - --dataset_config_name=sample-10BT
-  - --num_train_samples=0
-  - --num_eval_samples=512
-  - --streaming=True
-  - --packing=True
-  - --dataloader_num_workers=2
-  - --per_device_train_batch_size=320
-  - --per_device_eval_batch_size=256
-  - --max_seq_length=128
-  - --gradient_accumulation_steps=1
-  - --seed=42
-  - --diff_attention_mode=expressive
+    
+  # Fixed parameters
+  output_dir:
+    value: ./outputs/sweep
+  overwrite_output_dir:
+    value: True
+  project_name:
+    value: neon-test
+  run_name:
+    value: sweep
+  model_size:
+    value: test
+  bf16:
+    value: True
+  bf16_full_eval:
+    value: True
+  optim:
+    value: adamw_bnb_8bit
+  adam_beta1:
+    value: 0.9
+  adam_beta2:
+    value: 0.98
+  lr_scheduler_type:
+    value: cosine
+  weight_decay:
+    value: 0.01
+  max_steps:
+    value: 25000
+  warmup_steps:
+    value: 500
+  logging_strategy:
+    value: steps
+  logging_steps:
+    value: 100
+  report_to:
+    value: wandb
+  watch:
+    value: all
+  wandb_log_model:
+    value: end
+  eval_strategy:
+    value: steps
+  eval_steps:
+    value: 200
+  eval_on_start:
+    value: True
+  save_strategy:
+    value: steps
+  save_steps:
+    value: 200
+  save_total_limit:
+    value: 10
+  load_best_model_at_end:
+    value: True
+  dataset_name:
+    value: HuggingFaceFW/fineweb
+  dataset_config_name:
+    value: sample-10BT
+  num_train_samples:
+    value: 0
+  num_eval_samples:
+    value: 512
+  streaming:
+    value: True
+  packing:
+    value: True
+  dataloader_num_workers:
+    value: 2
+  per_device_train_batch_size:
+    value: 320
+  per_device_eval_batch_size:
+    value: 256
+  max_seq_length:
+    value: 128
+  gradient_accumulation_steps:
+    value: 1
+  seed:
+    value: 42
+  diff_attention_mode:
+    value: expressive

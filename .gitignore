@@ -1,7 +1,8 @@
-.vscode
-__pycache__
-/outputs
-wandb
+.vscode/
+__pycache__/
+outputs/
+wandb/
 training_queue.txt
-/job_logs
+job_logs/
 memory_videos/
+knowledge_base/
