@@ -22,7 +22,7 @@ cd neon-transformer
 echo "Starting W&B Agent for Sweep ${sweep_id}"
 
 # Run Agent in container with API keys passed in
-docker run --gpus all \
+docker run --runtime=nvidia \
     -v $(pwd):/workspace \
     -w /workspace \
     -e WANDB_API_KEY="${wandb_key}" \
