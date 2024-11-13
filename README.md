@@ -1,4 +1,4 @@
-Neon Transformer
+## Neon Transformer
 
 To run W&B Agent jobs on cloud compute:
 ```
