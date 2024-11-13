@@ -13,7 +13,7 @@ hf_key=$3
 sudo docker pull nvcr.io/nvidia/pytorch:24.10-py3
 
 # System-level setup that persists outside container
-sudo apt update && sudo apt install -y python3-pip git nvtop
+sudo apt update && sudo apt install -y python3-pip git nvtop ffmpeg
 
 # Clone repo (do this outside container)
 git clone https://github.com/nomadicsynth/neon-transformer.git
