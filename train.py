@@ -49,7 +49,7 @@ class DataArguments:
         default="HuggingFaceFW/fineweb", metadata={"help": "Name of the dataset to use"}
     )
     dataset_config_name: str = field(
-        default="sample-10BT", metadata={"help": "Name of the dataset configuration"}
+        default=None, metadata={"help": "Name of the dataset configuration"}
     )
     num_train_samples: int = field(
         default=1000, metadata={"help": "Number of training samples"}
