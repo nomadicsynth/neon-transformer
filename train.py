@@ -26,7 +26,7 @@ class ModelArguments:
     model_size: str = field(
         default="spark",
         metadata={
-            "help": "Size variant of the model to train (test, spark, glow, beam, arc, nova)"
+            "help": "Size variant of the model to train (test, spark, glow, beam, arc, nova)",
             "choices": ["test", "spark", "glow", "beam", "arc", "nova"],
         },
     )
