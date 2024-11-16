@@ -48,12 +48,12 @@ from .rms_norm import RMSNorm
 from .rotary import apply_rotary_emb
 
 if is_flash_attn_2_available():
-    from transformers.modeling_flash_attention_utils import \
-        _flash_attention_forward
+    from transformers.modeling_flash_attention_utils import _flash_attention_forward
 
 logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "NeonConfig"
+
 
 # TODO(nomadicsynth): Should not be needed. Remove when done implementing nGPT, probably.
 # # Copied from transformers.models.llama.modeling_llama.LlamaRMSNorm with Llama->Mistral
@@ -260,7 +260,7 @@ class NeonAttention(nn.Module):
             self.head_dim = config.hidden_size // config.num_attention_heads
             self.projection_size = self.hidden_size * 2
 
-        self.scaling = self.head_dim ** -0.5
+        self.scaling = self.head_dim**-0.5
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
         self.is_causal = True
@@ -656,15 +656,91 @@ class NeonDecoderLayer(nn.Module):
     def __init__(self, config: NeonConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
-        self.use_global_memories = config.num_global_memories > 0
-        self.use_layer_memories = config.num_layer_memories > 0
 
         self.self_attn = NEON_ATTENTION_CLASSES[config._attn_implementation](config=config, layer_idx=layer_idx)
         self.mlp = NeonMLP(config=config, layer_idx=layer_idx)
 
+        # Layer norms
+        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
+        self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Cache] = None,
+        output_attentions: Optional[bool] = False,
+        use_cache: Optional[bool] = False,
+        cache_position: Optional[torch.LongTensor] = None,
+        global_memories: nn.Parameter = None,
+        **kwargs,
+    ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
+        """
+        Args:
+            hidden_states (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
+            attention_mask (`torch.FloatTensor`, *optional*):
+                attention mask of size `(batch_size, sequence_length)` if flash attention is used or `(batch_size, 1,
+                query_sequence_length, key_sequence_length)` if default attention is used.
+            output_attentions (`bool`, *optional*):
+                Whether or not to return the attentions tensors of all attention layers. See `attentions` under
+                returned tensors for more detail.
+            use_cache (`bool`, *optional*):
+                If set to `True`, `past_key_values` key value states are returned and can be used to speed up decoding
+                (see `past_key_values`).
+            past_key_value (`Tuple(torch.FloatTensor)`, *optional*): cached past key and value projection states
+            cache_position (`torch.LongTensor` of shape `(sequence_length)`, *optional*):
+                Indices depicting the position of the input sequence tokens in the sequence
+            global_memories (`nn.Parameter`, *optional*):
+                Global memory of the model of shape `(batch_size, num_global_memories, embed_dim)`
+            kwargs (`dict`, *optional*):
+                Arbitrary kwargs to be ignored, used for FSDP and other methods that injects code
+                into the model
+        """
+        residual = hidden_states
+
+        hidden_states = self.input_layernorm(hidden_states)
+
+        # Self Attention
+        hidden_states, self_attn_weights, present_key_value = self.self_attn(
+            hidden_states=hidden_states,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_value=past_key_value,
+            output_attentions=output_attentions,
+            use_cache=use_cache,
+            cache_position=cache_position,
+            **kwargs,
+        )
+        hidden_states = residual + hidden_states
+
+        # Fully Connected
+        residual = hidden_states
+        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = self.mlp(hidden_states)
+        hidden_states = residual + hidden_states
+
+        outputs = (hidden_states,)
+
+        if output_attentions:
+            outputs += (self_attn_weights,)
+
+        if use_cache:
+            outputs += (present_key_value,)
+
+        return outputs
+
+
+class NeonMemoryDecoderLayer(NeonDecoderLayer):
+    def __init__(self, config: NeonConfig, layer_idx: int):
+        super().__init__(config=config, layer_idx=layer_idx)
+
+        self.use_global_memories = config.num_global_memories > 0
+        self.use_layer_memories = config.num_layer_functions > 0
+        if not (self.use_global_memories or self.use_layer_memories):
+            raise ValueError("Must have at least one memory type")
+
         # Global memory query
-        # Global memories are passed directly into forward instead of being passed into here to avoid
-        # errors from Safetensors about shared tensors.
         if self.use_global_memories:
             self.global_query = nn.Linear(self.hidden_size, config.num_global_memories, bias=False)
 
@@ -783,6 +859,242 @@ class NeonDecoderLayer(nn.Module):
         return outputs
 
 
+class NeonFlamingMoEDecoderLayer(NeonDecoderLayer):
+    def __init__(self, config: NeonConfig, layer_idx: int):
+        super().__init__(config=config, layer_idx=layer_idx)
+
+        self.use_global_functions = config.num_global_functions > 0
+        self.use_layer_functions = config.num_layer_functions > 0
+        if not (self.use_global_functions or self.use_layer_functions):
+            raise ValueError("Must have at least one function-bank type")
+
+        # Function selection mechanisms and function banks
+        if self.use_global_functions:
+            self.global_function_scorer = nn.Linear(self.hidden_size, config.num_global_functions, bias=False)
+
+        if self.use_layer_functions:
+            self.layer_function_scorer = nn.Linear(self.hidden_size, config.num_layer_functions, bias=False)
+            # Each layer function is a Linear layer
+            self.layer_functions = nn.ModuleList([
+                nn.Linear(self.hidden_size, self.hidden_size, bias=False)
+                for _ in range(config.num_layer_functions)
+            ])
+
+        # For visualizing function selection
+        self.function_selections = {'global': [], 'layer': []}
+
+        # Layer norms
+        if self.use_global_functions or self.use_layer_functions:
+            self.post_function_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
+
+    def select_and_apply_functions(self, x: torch.Tensor, global_functions: nn.ModuleList) -> torch.Tensor:
+        batch_size, seq_len, _ = x.shape
+        result = x
+
+        if self.use_global_functions:
+            scores = self.global_function_scorer(x)
+            selected_idx = torch.argmax(scores, dim=-1)  # [batch, seq]
+
+            if self.training:
+                self.function_selections['global'].append(selected_idx.detach().cpu())
+
+            # Apply selected global function
+            for b in range(batch_size):
+                for s in range(seq_len):
+                    idx = selected_idx[b, s]
+                    result[b, s] = global_functions[idx](x[b, s])
+
+        if self.use_layer_functions:
+            scores = self.layer_function_scorer(x)
+            selected_idx = torch.argmax(scores, dim=-1)
+
+            if self.training:
+                self.function_selections['layer'].append(selected_idx.detach().cpu())
+
+            # Apply selected layer function
+            for b in range(batch_size):
+                for s in range(seq_len):
+                    idx = selected_idx[b, s]
+                    result[b, s] = self.layer_functions[idx](result[b, s])
+
+        return result
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Cache] = None,
+        output_attentions: Optional[bool] = False,
+        use_cache: Optional[bool] = False,
+        cache_position: Optional[torch.LongTensor] = None,
+        global_functions: nn.ModuleList = None,
+        **kwargs,
+    ) -> Tuple[
+        torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]
+    ]:
+        """
+        Args:
+            hidden_states (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
+            attention_mask (`torch.FloatTensor`, *optional*):
+                attention mask of size `(batch_size, sequence_length)` if flash attention is used or `(batch_size, 1,
+                query_sequence_length, key_sequence_length)` if default attention is used.
+            output_attentions (`bool`, *optional*):
+                Whether or not to return the attentions tensors of all attention layers. See `attentions` under
+                returned tensors for more detail.
+            use_cache (`bool`, *optional*):
+                If set to `True`, `past_key_values` key value states are returned and can be used to speed up decoding
+                (see `past_key_values`).
+            past_key_value (`Tuple(torch.FloatTensor)`, *optional*): cached past key and value projection states
+            cache_position (`torch.LongTensor` of shape `(sequence_length)`, *optional*):
+                Indices depicting the position of the input sequence tokens in the sequence
+            global_memories (`nn.Parameter`, *optional*):
+                Global memory of the model of shape `(batch_size, num_global_memories, embed_dim)`
+            kwargs (`dict`, *optional*):
+                Arbitrary kwargs to be ignored, used for FSDP and other methods that injects code
+                into the model
+        """
+        residual = hidden_states
+
+        hidden_states = self.input_layernorm(hidden_states)
+
+        # Self Attention
+        hidden_states, self_attn_weights, present_key_value = self.self_attn(
+            hidden_states=hidden_states,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_value=past_key_value,
+            output_attentions=output_attentions,
+            use_cache=use_cache,
+            cache_position=cache_position,
+            **kwargs,
+        )
+        hidden_states = residual + hidden_states
+
+        # Dual function banks
+        if self.use_global_functions or self.use_layer_functions:
+            residual = hidden_states
+            hidden_states = self.post_attention_layernorm(hidden_states)
+            hidden_states = self.select_and_apply_functions(hidden_states, global_functions)
+            hidden_states = residual + hidden_states
+
+        # Fully Connected
+        residual = hidden_states
+        if self.use_global_functions or self.use_layer_functions:
+            hidden_states = self.post_function_layernorm(hidden_states)
+        else:
+            hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = self.mlp(hidden_states)
+        hidden_states = residual + hidden_states
+
+        outputs = (hidden_states,)
+
+        if output_attentions:
+            outputs += (self_attn_weights,)
+
+        if use_cache:
+            outputs += (present_key_value,)
+
+        return outputs
+
+
+class NeonLinearDecoderLayer(NeonDecoderLayer):
+    def __init__(self, config: NeonConfig, layer_idx: int):
+        super().__init__(config=config, layer_idx=layer_idx)
+
+        self.num_extra_linear_layers = 0
+
+        if config.num_global_functions > 0:
+            self.num_extra_linear_layers += 1
+        if config.num_layer_functions > 0:
+            self.num_extra_linear_layers += 1
+        if not self.num_extra_linear_layers > 0:
+            raise ValueError("Must have at least one function-bank type to provide effective control for function-bank experiments.")
+
+        # Extra linear layers
+        self.layer_functions = nn.ModuleList([
+            nn.Linear(self.hidden_size, self.hidden_size, bias=False)
+            for _ in range(self.num_extra_linear_layers)
+        ])
+
+        # Layer norms
+        self.post_extra_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Cache] = None,
+        output_attentions: Optional[bool] = False,
+        use_cache: Optional[bool] = False,
+        cache_position: Optional[torch.LongTensor] = None,
+        **kwargs,
+    ) -> Tuple[
+        torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]
+    ]:
+        """
+        Args:
+            hidden_states (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
+            attention_mask (`torch.FloatTensor`, *optional*):
+                attention mask of size `(batch_size, sequence_length)` if flash attention is used or `(batch_size, 1,
+                query_sequence_length, key_sequence_length)` if default attention is used.
+            output_attentions (`bool`, *optional*):
+                Whether or not to return the attentions tensors of all attention layers. See `attentions` under
+                returned tensors for more detail.
+            use_cache (`bool`, *optional*):
+                If set to `True`, `past_key_values` key value states are returned and can be used to speed up decoding
+                (see `past_key_values`).
+            past_key_value (`Tuple(torch.FloatTensor)`, *optional*): cached past key and value projection states
+            cache_position (`torch.LongTensor` of shape `(sequence_length)`, *optional*):
+                Indices depicting the position of the input sequence tokens in the sequence
+            global_memories (`nn.Parameter`, *optional*):
+                Global memory of the model of shape `(batch_size, num_global_memories, embed_dim)`
+            kwargs (`dict`, *optional*):
+                Arbitrary kwargs to be ignored, used for FSDP and other methods that injects code
+                into the model
+        """
+        residual = hidden_states
+
+        hidden_states = self.input_layernorm(hidden_states)
+
+        # Self Attention
+        hidden_states, self_attn_weights, present_key_value = self.self_attn(
+            hidden_states=hidden_states,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_value=past_key_value,
+            output_attentions=output_attentions,
+            use_cache=use_cache,
+            cache_position=cache_position,
+            **kwargs,
+        )
+        hidden_states = residual + hidden_states
+
+        # Extra linear layers
+        residual = hidden_states
+        hidden_states = self.post_attention_layernorm(hidden_states)
+        for extra_linear in self.extra_linear_layers:
+            hidden_states = extra_linear(hidden_states)
+        hidden_states = residual + hidden_states
+
+        # Fully Connected
+        residual = hidden_states
+        hidden_states = self.post_extra_layernorm(hidden_states)
+        hidden_states = self.mlp(hidden_states)
+        hidden_states = residual + hidden_states
+
+        outputs = (hidden_states,)
+
+        if output_attentions:
+            outputs += (self_attn_weights,)
+
+        if use_cache:
+            outputs += (present_key_value,)
+
+        return outputs
+
+
 NEON_START_DOCSTRING = r"""
     This model inherits from [`PreTrainedModel`]. Check the superclass documentation for the generic methods the
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
@@ -798,6 +1110,13 @@ NEON_START_DOCSTRING = r"""
             load the weights associated with the model, only the configuration. Check out the
             [`~PreTrainedModel.from_pretrained`] method to load the model weights.
 """
+
+NEON_DECODER_CLASSES = {
+    "regular": NeonDecoderLayer,
+    "memory": NeonMemoryDecoderLayer,
+    "function": NeonFlamingMoEDecoderLayer,
+    "linear-control": NeonLinearDecoderLayer,
+}
 
 
 @add_start_docstrings(
@@ -826,7 +1145,7 @@ class NeonPreTrainedModel(PreTrainedModel):
             module.weight.data.normal_(mean=0.0, std=std)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, (NeonModel, NeonDecoderLayer)):
+        elif isinstance(module, (NeonModel, NeonMemoryDecoderLayer)):
             for name, param in module.named_parameters():
                 if "memories" in name:
                     param.data.normal_(mean=0.0, std=std)
@@ -922,13 +1241,27 @@ class NeonModel(NeonPreTrainedModel):
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
-        if config.num_global_memories > 0:
-            self.global_memories = nn.Parameter(torch.randn(config.num_global_memories, config.hidden_size))
-        else:
-            self.global_memories = None
-        self.layers = nn.ModuleList(
-            [NeonDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
-        )
+
+        self.decoder_implementation = config.decoder_implementation
+        if self.decoder_implementation == "memory":
+            if config.num_global_memories > 0:
+                self.global_memories = nn.Parameter(torch.randn(config.num_global_memories, config.hidden_size))
+            else:
+                self.global_memories = None
+        elif self.decoder_implementation == "function":
+            if config.num_global_functions > 0:
+                self.global_functions = nn.ModuleList([
+                    nn.Linear(self.hidden_size, self.hidden_size, bias=False)
+                    for _ in range(config.num_global_functions)
+                ])
+            else:
+                self.global_functions = None
+
+        self.layers = nn.ModuleList([
+            NEON_DECODER_CLASSES[config.decoder_implementation](config, layer_idx)
+            for layer_idx in range(config.num_hidden_layers)
+        ])
+
         self._attn_implementation = config._attn_implementation
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
 
@@ -1027,7 +1360,7 @@ class NeonModel(NeonPreTrainedModel):
                     output_attentions,
                     use_cache,
                     cache_position,
-                    self.global_memories,
+                    self.global_memories if self.decoder_implementation == "memory" else self.global_functions if self.decoder_implementation == "function" else None,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -1038,7 +1371,7 @@ class NeonModel(NeonPreTrainedModel):
                     output_attentions=output_attentions,
                     use_cache=use_cache,
                     cache_position=cache_position,
-                    global_memories=self.global_memories,
+                    global_memories=self.global_memories if self.decoder_implementation == "memory" else self.global_functions if self.decoder_implementation == "function" else None,
                 )
 
             hidden_states = layer_outputs[0]

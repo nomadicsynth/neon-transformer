@@ -1,6 +1,7 @@
 print("Loading imports")
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import evaluate
 import matplotlib
@@ -25,7 +26,8 @@ class ModelArguments:
     model_size: str = field(
         default="spark",
         metadata={
-            "help": "Size variant of the model to train (spark, glow, beam, arc, nova)"
+            "help": "Size variant of the model to train (test, spark, glow, beam, arc, nova)"
+            "choices": ["test", "spark", "glow", "beam", "arc", "nova"],
         },
     )
     diff_attention_mode: str = field(
@@ -35,11 +37,24 @@ class ModelArguments:
             "choices": ["expressive", "constrained", "none"],
         },
     )
+    decoder_implementation: str = field(
+        default="regular",
+        metadata={
+            "help": "Implementation of the decoder to use. Can be either `regular`, `memory`, `function` or `linear-control`.",
+            "choices": ["regular", "memory", "function", "linear-control"],
+        },
+    )
     num_global_memories: int = field(
         default=0, metadata={"help": "Number of global memories"}
     )
     num_layer_memories: int = field(
         default=0, metadata={"help": "Number of layer-local memories"}
+    )
+    num_global_functions: int = field(
+        default=0, metadata={"help": "Number of global functions"}
+    )
+    num_layer_functions: int = field(
+        default=0, metadata={"help": "Number of layer-local functions"}
     )
 
 
@@ -460,6 +475,8 @@ def main():
     config.vocab_size = len(tokenizer)
     config.num_global_memories = model_args.num_global_memories
     config.num_layer_memories = model_args.num_layer_memories
+    config.num_global_functions = model_args.num_global_functions
+    config.num_layer_functions = model_args.num_layer_functions
 
     model = NeonForCausalLM(config)
     model_num_params = sum(p.numel() for p in model.parameters())

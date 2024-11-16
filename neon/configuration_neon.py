@@ -15,17 +15,12 @@
 """Neon model configuration"""
 
 from enum import Enum
+from typing import Literal
 
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
 
 logger = logging.get_logger(__name__)
-
-
-class DiffAttentionMode(str, Enum):
-    NONE = "none"  # Disabled
-    CONSTRAINED = "constrained"  # Reference implementation, halved head_dim
-    EXPRESSIVE = "expressive"  # Paper implementation, full vector space
 
 
 # copied from transformers.models.mistral.configuration_mistral.MistralConfig
@@ -90,14 +85,20 @@ class NeonConfig(PretrainedConfig):
                 sliding window attention.
             attention_dropout (`float`, *optional*, defaults to 0.0):
                 The dropout ratio for the attention probabilities.
-            diff_attention_mode (`DiffAttentionMode`, *optional*, defaults to `DiffAttentionMode.EXPRESSIVE`):
-                The mode for differential attention: `CONSTRAINED` (reference) or `EXPRESSIVE` (paper). `NONE` disables
+            diff_attention_mode (`str`, *optional*, defaults to `"expressive"`):
+                The mode for differential attention: `"constrained"` (reference), `"expressive"` (paper), or `"none"` (disabled).
             diff_mlp (`bool`, *optional*, defaults to `False`):
                 Whether to use differential noise-reduction in the MLP.
+            decoder_implementation (`str`, *optional*, defaults to `"regular"`):
+                The implementation of the decoder. Can be `"regular"`, `"memory"`, `"function"`, or `"linear-control"`.
             num_global_memories (`int`, *optional*, defaults to 0):
                 The number of global memories. 0 disables global memories.
             num_layer_memories (`int`, *optional*, defaults to 0):
                 The number of layer-local memories. 0 disables layer-local memories.
+            num_global_functions (`int`, *optional*, defaults to 0):
+                The number of global functions. 0 disables global functions.
+            num_layer_functions (`int`, *optional*, defaults to 0):
+                The number of layer-local functions. 0 disables layer-local functions.
     )
 
 
@@ -138,10 +139,13 @@ class NeonConfig(PretrainedConfig):
         rope_theta=10000.0,
         sliding_window=None,
         attention_dropout=0.0,
-        diff_attention_mode: DiffAttentionMode = DiffAttentionMode.EXPRESSIVE,
+        diff_attention_mode: Literal["constrained", "expressive", "none"] = "expressive",
         diff_mlp=False,
+        decoder_implementation: Literal["regular", "memory", "function", "linear-control"] = "regular",
         num_global_memories=0,
         num_layer_memories=0,
+        num_global_functions=0,
+        num_layer_functions=0,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -151,10 +155,6 @@ class NeonConfig(PretrainedConfig):
         self.num_hidden_layers = num_hidden_layers
         self.num_attention_heads = num_attention_heads
         self.sliding_window = sliding_window
-        self.diff_attention_mode = diff_attention_mode
-        self.diff_mlp = diff_mlp
-        self.num_global_memories = num_global_memories
-        self.num_layer_memories = num_layer_memories
         self.head_dim = head_dim or hidden_size // num_attention_heads
 
         # for backward compatibility
@@ -168,6 +168,14 @@ class NeonConfig(PretrainedConfig):
         self.use_cache = use_cache
         self.rope_theta = rope_theta
         self.attention_dropout = attention_dropout
+
+        self.diff_attention_mode = diff_attention_mode
+        self.diff_mlp = diff_mlp
+        self.decoder_implementation = decoder_implementation
+        self.num_global_functions = num_global_memories
+        self.num_layer_functions = num_layer_memories
+        self.num_global_functions = num_global_functions
+        self.num_layer_functions = num_layer_functions
 
         super().__init__(
             pad_token_id=pad_token_id,
