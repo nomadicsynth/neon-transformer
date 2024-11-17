@@ -80,7 +80,7 @@ class DataArguments:
 @dataclass
 class WandbArguments:
     project_name: str = field(
-        default="neon-test", metadata={"help": "Name of the W&B project"}
+        default=None, metadata={"help": "Name of the W&B project"}
     )
     watch: str = field(
         default="false",
