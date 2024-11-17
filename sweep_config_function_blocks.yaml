@@ -10,12 +10,12 @@ parameters:
     # Literal["regular", "memory", "function", "linear-control"] = "regular",
     distribution: categorical
     values: [function, linear-control]
-  num_global_memories:
+  num_global_functions:
     distribution: categorical
-    values: [0, 32, 64, 96, 128, 160, 192, 224, 256]
-  num_layer_memories:
+    values: [0, 64, 128, 192, 256]
+  num_layer_functions:
     distribution: categorical
-    values: [0, 32, 64, 96, 128, 160, 192, 224, 256]
+    values: [0, 64, 128, 192, 256]
   learning_rate:
     distribution: log_uniform_values
     min: 1e-3
@@ -33,7 +33,7 @@ parameters:
   dataloader_num_workers:
     value: 2
   dataset_name:
-    value: /mnt/embiggen/ai-stuff/datasets/fineweb/data/sample-10BT
+    value: ./dataset/fineweb/data/sample-10BT
   diff_attention_mode:
     value: expressive
   eval_on_start:
