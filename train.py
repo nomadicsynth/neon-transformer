@@ -460,21 +460,21 @@ class FunctionSelectionCallback(TrainerCallback):
                         layer.function_selections[func_type] = []
 
             # Global functions (model level)
-            if hasattr(model.model, 'global_functions'):
-                for func_idx, func in enumerate(model.model.global_functions):
-                    wandb.log({
-                        f"parameters/model.global_functions.{func_idx}.weight": wandb.Histogram(func.weight.data),
-                        f"gradients/model.global_functions.{func_idx}.weight": wandb.Histogram(func.weight.grad)
-                    })
+            # if hasattr(model.model, 'global_functions'):
+            #     for func_idx, func in enumerate(model.model.global_functions):
+            #         wandb.log({
+            #             f"parameters/model.global_functions.{func_idx}.weight": wandb.Histogram(func.weight.data.cpu()),
+            #             f"gradients/model.global_functions.{func_idx}.weight": wandb.Histogram(func.weight.grad.cpu())
+            #         })
             
             # Layer functions (per layer)
-            for layer_idx, layer in enumerate(model.model.layers):
-                if layer.use_layer_functions:
-                    for func_idx, func in enumerate(layer.layer_functions):
-                        wandb.log({
-                            f"parameters/model.layers.{layer_idx}.layer_functions.{func_idx}.weight": wandb.Histogram(func.weight.data),
-                            f"gradients/model.layers.{layer_idx}.layer_functions.{func_idx}.weight": wandb.Histogram(func.weight.grad)
-                        })
+            # for layer_idx, layer in enumerate(model.model.layers):
+            #     if layer.use_layer_functions:
+            #         for func_idx, func in enumerate(layer.layer_functions):
+            #             wandb.log({
+            #                 f"parameters/model.layers.{layer_idx}.layer_functions.{func_idx}.weight": wandb.Histogram(func.weight.data.cpu()),
+            #                 f"gradients/model.layers.{layer_idx}.layer_functions.{func_idx}.weight": wandb.Histogram(func.weight.grad.cpu())
+            #             })
 
 
     def on_train_end(self, args, state, control, **kwargs):

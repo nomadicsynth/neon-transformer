@@ -892,18 +892,17 @@ class NeonFlamingMoEDecoderLayer(NeonDecoderLayer):
         if self.use_global_functions:
             # Get scores and convert to selections using gumbel_softmax
             scores = self.global_function_scorer(x)
-            selections = F.gumbel_softmax(scores, tau=1.0, hard=True, dim=-1)  # [batch, seq]
+            selections = F.gumbel_softmax(scores, tau=1.0, hard=True, dim=-1)  # [batch, seq, num_funcs]
 
             if self.training:
                 # For visualization, get the hard choices
                 selected_idx = torch.argmax(scores, dim=-1)
                 self.function_selections['global'].append(selected_idx.detach().cpu())
 
-            # Process all tokens for each function at once
-            for i in range(len(global_functions)):
-                selection_weights = selections[..., i].unsqueeze(-1)
-                transformed = global_functions[i](x)
-                result = result + selection_weights * transformed
+            # Apply all functions and combine with selections
+            transformed = torch.stack([func(x) for func in global_functions], dim=-2)  # [batch, seq, num_funcs, hidden]
+            selections = selections.unsqueeze(-1)  # [batch, seq, num_funcs, 1]
+            result = result + (transformed * selections).sum(dim=-2)  # Sum over functions dimension
 
         if self.use_layer_functions:
             scores = self.layer_function_scorer(x)
@@ -914,10 +913,9 @@ class NeonFlamingMoEDecoderLayer(NeonDecoderLayer):
                 self.function_selections['layer'].append(selected_idx.detach().cpu())
 
             # Apply selected layer function
-            for i in range(len(self.layer_functions)):
-                selection_weights = selections[..., i].unsqueeze(-1)
-                transformed = self.layer_functions[i](x)
-                result = result + selection_weights * transformed
+            transformed = torch.stack([func(x) for func in self.layer_functions], dim=-2)
+            selections = selections.unsqueeze(-1)
+            result = result + (transformed * selections).sum(dim=-2)
 
         return result
 
