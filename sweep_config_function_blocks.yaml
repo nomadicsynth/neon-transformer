@@ -1,0 +1,94 @@
+program: train.py
+method: bayes
+metric:
+  name: eval/accuracy
+  goal: maximize
+
+parameters:
+  # Sweep parameters
+  learning_rate:
+    distribution: log_uniform_values
+    min: 1e-3
+    max: 1e-2
+  num_global_memories:
+    distribution: categorical
+    values: [0, 4, 8, 12, 16, 24, 32, 40, 48, 56, 64]
+  num_layer_memories:
+    distribution: categorical
+    values: [0, 4, 8, 12, 16, 24, 32, 40, 48, 56, 64]
+
+  # Fixed parameters
+  adam_beta1:
+    value: 0.9
+  adam_beta2:
+    value: 0.98
+  bf16:
+    value: true
+  bf16_full_eval:
+    value: true
+  dataloader_num_workers:
+    value: 2
+  dataset_name:
+    value: /mnt/embiggen/ai-stuff/datasets/fineweb/data/sample-10BT
+  diff_attention_mode:
+    value: expressive
+  eval_on_start:
+    value: true
+  eval_steps:
+    value: 200
+  eval_strategy:
+    value: steps
+  gradient_accumulation_steps:
+    value: 1
+  load_best_model_at_end:
+    value: true
+  logging_steps:
+    value: 100
+  logging_strategy:
+    value: steps
+  lr_scheduler_type:
+    value: cosine
+  max_seq_length:
+    value: 128
+  max_steps:
+    value: 25000
+  model_size:
+    value: test
+  num_eval_samples:
+    value: 512
+  num_train_samples:
+    value: 0
+  optim:
+    value: adamw_bnb_8bit
+  output_dir:
+    value: ./outputs/sweep
+  overwrite_output_dir:
+    value: true
+  packing:
+    value: true
+  per_device_eval_batch_size:
+    value: 256
+  per_device_train_batch_size:
+    value: 320
+  report_to:
+    value: wandb
+  run_name:
+    value: sweep
+  save_steps:
+    value: 200
+  save_strategy:
+    value: steps
+  save_total_limit:
+    value: 10
+  seed:
+    value: 42
+  streaming:
+    value: true
+  wandb_log_model:
+    value: end
+  warmup_steps:
+    value: 500
+  watch:
+    value: all
+  weight_decay:
+    value: 0.01
