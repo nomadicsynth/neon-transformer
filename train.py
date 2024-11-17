@@ -511,7 +511,8 @@ def main():
         import os
 
         # set the wandb project where this run will be logged
-        os.environ["WANDB_PROJECT"] = wandb_args.project_name
+        if wandb_args.project_name is not None:
+            os.environ["WANDB_PROJECT"] = wandb_args.project_name
 
         # turn off watch to log faster
         os.environ["WANDB_WATCH"] = wandb_args.watch
