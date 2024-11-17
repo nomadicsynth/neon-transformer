@@ -901,9 +901,9 @@ class NeonFlamingMoEDecoderLayer(NeonDecoderLayer):
 
             # Process all tokens for each function at once
             for i in range(len(global_functions)):
-                mask = selections[..., i] > 0  # Get tokens that selected this function
-                if mask.any():
-                    result[mask] = global_functions[i](x[mask]).to(x.dtype)
+                selection_weights = selections[..., i].unsqueeze(-1)
+                transformed = global_functions[i](x)
+                result = result + selection_weights * transformed
 
         if self.use_layer_functions:
             scores = self.layer_function_scorer(x)
@@ -915,9 +915,9 @@ class NeonFlamingMoEDecoderLayer(NeonDecoderLayer):
 
             # Apply selected layer function
             for i in range(len(self.layer_functions)):
-                mask = selections[..., i] > 0
-                if mask.any():
-                    result[mask] = self.layer_functions[i](x[mask]).to(x.dtype)
+                selection_weights = selections[..., i].unsqueeze(-1)
+                transformed = self.layer_functions[i](x)
+                result = result + selection_weights * transformed
 
         return result
 
