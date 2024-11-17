@@ -24,6 +24,7 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
+from torch.nn import functional as F
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers.activations import ACT2FN
@@ -43,7 +44,7 @@ from transformers.utils import (add_start_docstrings,
                                 is_torchdynamo_compiling, logging,
                                 replace_return_docstrings)
 
-from .configuration_neon import DiffAttentionMode, NeonConfig
+from .configuration_neon import NeonConfig
 from .rms_norm import RMSNorm
 from .rotary import apply_rotary_emb
 
@@ -250,13 +251,13 @@ class NeonAttention(nn.Module):
                                   else config.num_attention_heads)
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
 
-        self.diff_attention_mode = DiffAttentionMode(config.diff_attention_mode)
+        self.diff_attention_mode = config.diff_attention_mode
 
         # Adjust head_dim and projection sizes based on mode
-        if self.diff_attention_mode == DiffAttentionMode.CONSTRAINED:
+        if self.diff_attention_mode == "constrained":
             self.head_dim = config.hidden_size // config.num_attention_heads // 2
             self.projection_size = self.hidden_size
-        else:  # EXPRESSIVE
+        else:  # expressive
             self.head_dim = config.hidden_size // config.num_attention_heads
             self.projection_size = self.hidden_size * 2
 
@@ -888,34 +889,37 @@ class NeonFlamingMoEDecoderLayer(NeonDecoderLayer):
             self.post_function_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
 
     def select_and_apply_functions(self, x: torch.Tensor, global_functions: nn.ModuleList) -> torch.Tensor:
-        batch_size, seq_len, _ = x.shape
         result = x
 
         if self.use_global_functions:
+            # Get scores and convert to selections using gumbel_softmax
             scores = self.global_function_scorer(x)
-            selected_idx = torch.argmax(scores, dim=-1)  # [batch, seq]
+            selections = F.gumbel_softmax(scores, tau=1.0, hard=True, dim=-1)  # [batch, seq]
 
             if self.training:
+                # For visualization, get the hard choices
+                selected_idx = torch.argmax(scores, dim=-1)
                 self.function_selections['global'].append(selected_idx.detach().cpu())
 
-            # Apply selected global function
-            for b in range(batch_size):
-                for s in range(seq_len):
-                    idx = selected_idx[b, s]
-                    result[b, s] = global_functions[idx](x[b, s])
+            # Process all tokens for each function at once
+            for i in range(len(global_functions)):
+                mask = selections[..., i] > 0  # Get tokens that selected this function
+                if mask.any():
+                    result[mask] = global_functions[i](x[mask]).to(x.dtype)
 
         if self.use_layer_functions:
             scores = self.layer_function_scorer(x)
-            selected_idx = torch.argmax(scores, dim=-1)
+            selections = F.gumbel_softmax(scores, tau=1.0, hard=True, dim=-1)
 
             if self.training:
+                selected_idx = torch.argmax(scores, dim=-1)
                 self.function_selections['layer'].append(selected_idx.detach().cpu())
 
             # Apply selected layer function
-            for b in range(batch_size):
-                for s in range(seq_len):
-                    idx = selected_idx[b, s]
-                    result[b, s] = self.layer_functions[idx](result[b, s])
+            for i in range(len(self.layer_functions)):
+                mask = selections[..., i] > 0
+                if mask.any():
+                    result[mask] = self.layer_functions[i](x[mask]).to(x.dtype)
 
         return result
 
@@ -1251,7 +1255,7 @@ class NeonModel(NeonPreTrainedModel):
         elif self.decoder_implementation == "function":
             if config.num_global_functions > 0:
                 self.global_functions = nn.ModuleList([
-                    nn.Linear(self.hidden_size, self.hidden_size, bias=False)
+                    nn.Linear(config.hidden_size, config.hidden_size, bias=False)
                     for _ in range(config.num_global_functions)
                 ])
             else:
@@ -1350,6 +1354,12 @@ class NeonModel(NeonPreTrainedModel):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
+            global_memories_or_functions = {}
+            if self.decoder_implementation == "memory":
+                global_memories_or_functions["global_memories"] = self.global_memories
+            elif self.decoder_implementation == "function":
+                global_memories_or_functions["global_functions"] = self.global_functions
+
             if self.gradient_checkpointing and self.training:
                 layer_outputs = self._gradient_checkpointing_func(
                     decoder_layer.__call__,
@@ -1360,7 +1370,7 @@ class NeonModel(NeonPreTrainedModel):
                     output_attentions,
                     use_cache,
                     cache_position,
-                    self.global_memories if self.decoder_implementation == "memory" else self.global_functions if self.decoder_implementation == "function" else None,
+                    **global_memories_or_functions,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -1371,7 +1381,7 @@ class NeonModel(NeonPreTrainedModel):
                     output_attentions=output_attentions,
                     use_cache=use_cache,
                     cache_position=cache_position,
-                    global_memories=self.global_memories if self.decoder_implementation == "memory" else self.global_functions if self.decoder_implementation == "function" else None,
+                    **global_memories_or_functions,
                 )
 
             hidden_states = layer_outputs[0]

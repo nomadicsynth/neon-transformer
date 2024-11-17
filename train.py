@@ -14,11 +14,11 @@ import torch
 from datasets import load_dataset
 from matplotlib.colors import LogNorm
 from transformers import EvalPrediction, TrainerCallback
+from transformers.tokenization_utils import PaddingStrategy, TruncationStrategy
 from trl import SFTConfig, SFTTrainer
 
 import wandb
 from neon import NeonConfig, NeonForCausalLM
-from neon.configuration_neon import DiffAttentionMode
 
 
 @dataclass
@@ -98,8 +98,15 @@ class WandbArguments:
     )
 
 
-def get_model_config(args: ModelArguments) -> NeonConfig:
+def get_model_config(args: ModelArguments, tokenizer=None) -> NeonConfig:
     """Get model configuration based on size variant."""
+
+    # One day... ONE DAY... all dtypes will be perfectly matched!
+    # if args._attn_implementation == "flash_attention_2":
+    #     print("Warning: Flash Attention 2.0 requires bf16, enabling bf16")
+    #     args.bf16 = True
+    # else:
+    #     args.bf16 = False
 
     if args.diff_attention_mode not in ["expressive", "constrained"]:
         raise ValueError(
@@ -167,12 +174,24 @@ def get_model_config(args: ModelArguments) -> NeonConfig:
         initializer_range=0.02,
         rope_theta=10000.0,
         tie_word_embeddings=True,
-        diff_attention_mode=(
-            DiffAttentionMode.CONSTRAINED
-            if args.diff_attention_mode == "constrained"
-            else DiffAttentionMode.EXPRESSIVE
-        ),
+        diff_attention_mode=args.diff_attention_mode,
+        _attn_implementation=args._attn_implementation,
+        # torch_dtype=torch.bfloat16 if args.bf16 else torch.float32,
+        decoder_implementation=args.decoder_implementation,
+        num_global_memories=args.num_global_memories,
+        num_layer_memories=args.num_layer_memories,
+        num_global_functions=args.num_global_functions,
+        num_layer_functions=args.num_layer_functions,
     )
+
+    # Override vocab_size and pad_token_id if tokenizer provided
+    if tokenizer is not None:
+        base_config.update(
+            {
+                "vocab_size": len(tokenizer),
+                "pad_token_id": tokenizer.pad_token_id,
+            }
+        )
 
     config_dict = {**base_config, **configs[args.model_size]}
     return NeonConfig(**config_dict)
@@ -188,6 +207,14 @@ def prepare_dataset(args: DataArguments):
 
     # Set pad token to eos token
     tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.set_truncation_and_padding(
+        padding_strategy=PaddingStrategy.LONGEST,
+        truncation_strategy=TruncationStrategy.LONGEST_FIRST,
+        max_length=args.max_seq_length,
+        stride=args.max_seq_length // 8,
+        pad_to_multiple_of=8,
+        padding_side="right",
+    )
 
     # Load dataset with streaming if specified
     print("Loading dataset")
@@ -298,6 +325,7 @@ class MemoryVisualizerCallback(TrainerCallback):
 
     def on_train_end(self, args, state, control, **kwargs):
         if state.is_local_process_zero:
+            self.log_to_wandb = "wandb" in args.report_to
             model = kwargs["model"]
 
             videos = {}
@@ -407,25 +435,75 @@ class MemoryVisualizerCallback(TrainerCallback):
             anim.save(video_path, writer=animation.FFMpegWriter(fps=10, bitrate=2000))
 
             # Log to wandb
-            wandb.log(
-                {
-                    f"memory_videos/{name}": wandb.Video(
-                        str(video_path), fps=10, format="mp4"
-                    )
-                }
-            )
+            if self.log_to_wandb:
+                wandb.log({f"memory_videos/{name}": wandb.Video(str(video_path), format="mp4")})
+
+
+class FunctionSelectionCallback(TrainerCallback):
+    def __init__(self, save_dir="./function_videos"):
+        self.save_dir = Path(save_dir)
+        self.save_dir.mkdir(exist_ok=True)
+        self.selections = {'global': [], 'layer': []}
+        self.steps = []
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if state.is_local_process_zero:
+            model = kwargs["model"]
+            self.steps.append(state.global_step)
+
+            # Collect selections from all layers
+            for layer in model.model.layers:
+                for func_type in ["global", "layer"]:
+                    if layer.function_selections[func_type]:
+                        selections = [s.detach().cpu() for s in layer.function_selections[func_type]]
+                        self.selections[func_type].extend(selections)
+                        layer.function_selections[func_type] = []
+
+    def on_train_end(self, args, state, control, **kwargs):
+        if state.is_local_process_zero:
+            self.log_to_wandb = "wandb" in args.report_to
+            self._create_selection_visualizations()
+
+    def _create_selection_visualizations(self):
+        for func_type in ['global', 'layer']:
+            if not self.selections[func_type]:
+                continue
+
+            # Flatten all selections without padding
+            all_selections = torch.cat([s.flatten() for s in self.selections[func_type]])
+            
+            # Count selections
+            num_functions = max(all_selections.max().item() + 1, 1)
+            selection_counts = torch.bincount(all_selections, minlength=num_functions)
+            
+            # Create visualization
+            fig, ax = plt.subplots(figsize=(15, 8))
+            heatmap = ax.imshow(selection_counts.view(1, -1), 
+                              aspect='auto', 
+                              cmap='viridis')
+
+            plt.colorbar(heatmap)
+            ax.set_title(f'{func_type.capitalize()} Function Selection Frequencies')
+            ax.set_xlabel('Function Index')
+            ax.set_ylabel('Frequency')
+
+            # Save visualization
+            plt.savefig(self.save_dir / f'{func_type}_function_selections.png')
+            plt.close()
+
+            # Log to wandb
+            if self.log_to_wandb:
+                wandb.log({
+                    f'function_selection/{func_type}_heatmap': wandb.Image(str(self.save_dir / f'{func_type}_function_selections.png'))
+                })
 
 
 def main():
     print("Processing command-line arguments")
     from transformers import HfArgumentParser
 
-    parser = HfArgumentParser(
-        (ModelArguments, DataArguments, SFTConfig, WandbArguments)
-    )
-    model_args, data_args, training_args, wandb_args = (
-        parser.parse_args_into_dataclasses()
-    )
+    parser = HfArgumentParser((ModelArguments, DataArguments, SFTConfig, WandbArguments))
+    model_args, data_args, training_args, wandb_args = (parser.parse_args_into_dataclasses())
 
     # Configure wandb logging
     if "wandb" in training_args.report_to:
@@ -462,21 +540,14 @@ def main():
     data_args.max_seq_length = training_args.max_seq_length
     datasets, tokenizer = prepare_dataset(data_args)
     if data_args.streaming and not training_args.max_steps > 0:
-        training_args.max_steps = (
-            data_args.num_train_samples // training_args.per_device_train_batch_size
-        )
+        training_args.max_steps = (data_args.num_train_samples // training_args.per_device_train_batch_size)
 
     # Initialize model
     print("Initializing model")
-    config = get_model_config(model_args)
-    # config._attn_implementation = "eager"
-    config._attn_implementation = "flash_attention_2"
-    # config._attn_implementation = "sdpa"
-    config.vocab_size = len(tokenizer)
-    config.num_global_memories = model_args.num_global_memories
-    config.num_layer_memories = model_args.num_layer_memories
-    config.num_global_functions = model_args.num_global_functions
-    config.num_layer_functions = model_args.num_layer_functions
+    # model_args._attn_implementation = "eager"
+    model_args._attn_implementation = "flash_attention_2"
+    # model_args._attn_implementation = "sdpa"
+    config = get_model_config(model_args, tokenizer)
 
     model = NeonForCausalLM(config)
     model_num_params = sum(p.numel() for p in model.parameters())
@@ -496,8 +567,12 @@ def main():
         eval_dataset=datasets["test"],
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
-        callbacks=[MemoryVisualizerCallback()],
     )
+
+    if model_args.decoder_implementation == "memory":
+        trainer.add_callback(MemoryVisualizerCallback())
+    elif model_args.decoder_implementation == "function":
+        trainer.add_callback(FunctionSelectionCallback())
 
     # Train the model
     try:
