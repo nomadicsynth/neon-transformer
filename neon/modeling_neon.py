@@ -1074,7 +1074,7 @@ class NeonLinearDecoderLayer(NeonDecoderLayer):
         if self.num_extra_linear_layers > 0:
             residual = hidden_states
             hidden_states = self.post_attention_layernorm(hidden_states)
-            for extra_linear in self.extra_linear_layers:
+            for extra_linear in self.num_extra_linear_layers:
                 hidden_states = extra_linear(hidden_states)
             hidden_states = residual + hidden_states
 
