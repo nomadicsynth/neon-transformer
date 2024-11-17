@@ -866,8 +866,6 @@ class NeonFlamingMoEDecoderLayer(NeonDecoderLayer):
 
         self.use_global_functions = config.num_global_functions > 0
         self.use_layer_functions = config.num_layer_functions > 0
-        if not (self.use_global_functions or self.use_layer_functions):
-            raise ValueError("Must have at least one function-bank type")
 
         # Function selection mechanisms and function banks
         if self.use_global_functions:
