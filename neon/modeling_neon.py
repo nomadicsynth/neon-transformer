@@ -1010,17 +1010,16 @@ class NeonLinearDecoderLayer(NeonDecoderLayer):
             self.num_extra_linear_layers += 1
         if config.num_layer_functions > 0:
             self.num_extra_linear_layers += 1
-        if not self.num_extra_linear_layers > 0:
-            raise ValueError("Must have at least one function-bank type to provide effective control for function-bank experiments.")
 
         # Extra linear layers
-        self.layer_functions = nn.ModuleList([
-            nn.Linear(self.hidden_size, self.hidden_size, bias=False)
-            for _ in range(self.num_extra_linear_layers)
-        ])
+        if self.num_extra_linear_layers > 0:
+            self.layer_functions = nn.ModuleList([
+                nn.Linear(self.hidden_size, self.hidden_size, bias=False)
+                for _ in range(self.num_extra_linear_layers)
+            ])
 
-        # Layer norms
-        self.post_extra_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
+            # Layer norms
+            self.post_extra_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, elementwise_affine=True)
 
     def forward(
         self,
@@ -1074,15 +1073,19 @@ class NeonLinearDecoderLayer(NeonDecoderLayer):
         hidden_states = residual + hidden_states
 
         # Extra linear layers
-        residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
-        for extra_linear in self.extra_linear_layers:
-            hidden_states = extra_linear(hidden_states)
-        hidden_states = residual + hidden_states
+        if self.num_extra_linear_layers > 0:
+            residual = hidden_states
+            hidden_states = self.post_attention_layernorm(hidden_states)
+            for extra_linear in self.extra_linear_layers:
+                hidden_states = extra_linear(hidden_states)
+            hidden_states = residual + hidden_states
 
         # Fully Connected
         residual = hidden_states
-        hidden_states = self.post_extra_layernorm(hidden_states)
+        if self.num_extra_linear_layers > 0:
+            hidden_states = self.post_extra_layernorm(hidden_states)
+        else:
+            hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
