@@ -6,16 +6,20 @@ metric:
 
 parameters:
   # Sweep parameters
+  decoder_implementation:
+    # Literal["regular", "memory", "function", "linear-control"] = "regular",
+    distribution: categorical
+    values: [function, linear-control]
+  num_global_memories:
+    distribution: categorical
+    values: [0, 32, 64, 96, 128, 160, 192, 224, 256]
+  num_layer_memories:
+    distribution: categorical
+    values: [0, 32, 64, 96, 128, 160, 192, 224, 256]
   learning_rate:
     distribution: log_uniform_values
     min: 1e-3
     max: 1e-2
-  num_global_memories:
-    distribution: categorical
-    values: [0, 4, 8, 12, 16, 24, 32, 40, 48, 56, 64]
-  num_layer_memories:
-    distribution: categorical
-    values: [0, 4, 8, 12, 16, 24, 32, 40, 48, 56, 64]
 
   # Fixed parameters
   adam_beta1:
