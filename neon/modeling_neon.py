@@ -1011,7 +1011,7 @@ class NeonLinearDecoderLayer(NeonDecoderLayer):
 
         # Extra linear layers
         if self.num_extra_linear_layers > 0:
-            self.layer_functions = nn.ModuleList([
+            self.extra_linear_layers = nn.ModuleList([
                 nn.Linear(self.hidden_size, self.hidden_size, bias=False)
                 for _ in range(self.num_extra_linear_layers)
             ])
@@ -1074,7 +1074,7 @@ class NeonLinearDecoderLayer(NeonDecoderLayer):
         if self.num_extra_linear_layers > 0:
             residual = hidden_states
             hidden_states = self.post_attention_layernorm(hidden_states)
-            for extra_linear in self.num_extra_linear_layers:
+            for extra_linear in self.extra_linear_layers:
                 hidden_states = extra_linear(hidden_states)
             hidden_states = residual + hidden_states
 
