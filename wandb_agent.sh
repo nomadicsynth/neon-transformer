@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [ $# -ne 3 ]; then
+if [ $# -ne 4 ]; then
     echo "Usage: $0 <project_name> <wandb_sweep_id> <wandb_key> <hf_key>"
     exit 1
 fi
