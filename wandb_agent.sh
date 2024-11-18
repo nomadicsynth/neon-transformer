@@ -1,13 +1,14 @@
 #!/bin/bash
 
 if [ $# -ne 3 ]; then
-    echo "Usage: $0 <wandb_sweep_id> <wandb_key> <hf_key>"
+    echo "Usage: $0 <project_name> <wandb_sweep_id> <wandb_key> <hf_key>"
     exit 1
 fi
 
-sweep_id=$1
-wandb_key=$2
-hf_key=$3
+project_name=$1
+sweep_id=$2
+wandb_key=$3
+hf_key=$4
 
 # Pull NVIDIA PyTorch container
 sudo docker pull nvcr.io/nvidia/pytorch:24.10-py3
@@ -20,6 +21,7 @@ git clone https://github.com/nomadicsynth/neon-transformer.git
 cd neon-transformer
 
 echo "Starting W&B Agent for Sweep ${sweep_id}"
+echo "Project: ${project_name}"
 
 # Run Agent in container with API keys passed in
 sudo docker run --gpus all \
@@ -48,7 +50,7 @@ sudo docker run --gpus all \
     git config --global --add safe.directory /workspace
 
     # Run Agent
-    wandb agent neon-cortex/neon-test/${sweep_id}
+    wandb agent neon-cortex/${project_name}/${sweep_id}
 "
 
 echo "Agent Shutdown"
