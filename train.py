@@ -622,10 +622,10 @@ def main():
         compute_metrics=compute_metrics,
     )
 
-    if model_args.decoder_implementation == "memory":
-        trainer.add_callback(MemoryVisualizerCallback())
-    elif model_args.decoder_implementation == "function":
-        trainer.add_callback(FunctionSelectionCallback())
+    # if model_args.decoder_implementation == "memory":
+    #     trainer.add_callback(MemoryVisualizerCallback())
+    # elif model_args.decoder_implementation == "function":
+    #     trainer.add_callback(FunctionSelectionCallback())
 
     # Train the model
     try:
