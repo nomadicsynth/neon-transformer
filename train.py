@@ -464,7 +464,7 @@ class FunctionSelectionCallback(TrainerCallback):
     def __init__(self, save_dir="./function_videos"):
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(exist_ok=True)
-        self.selections = {'global': [], 'layer': []}
+        self.selections = {'global': None, 'layer': None}
         self.steps = []
 
     def on_log(self, args, state, control, logs=None, **kwargs):
@@ -476,8 +476,14 @@ class FunctionSelectionCallback(TrainerCallback):
             for layer in model.model.layers:
                 for func_type in ["global", "layer"]:
                     if layer.function_selections[func_type]:
-                        selections = [s.detach().cpu() for s in layer.function_selections[func_type]]
-                        self.selections[func_type].extend(selections)
+                        selections = torch.cat([s.flatten() for s in layer.function_selections[func_type]])
+                        counts = torch.bincount(selections, minlength=self.num_functions)
+                        
+                        if self.selection_counts[func_type] is None:
+                            self.selection_counts[func_type] = counts
+                        else:
+                            self.selection_counts[func_type] += counts
+                        
                         layer.function_selections[func_type] = []
 
 
@@ -488,35 +494,28 @@ class FunctionSelectionCallback(TrainerCallback):
 
     def _create_selection_visualizations(self):
         for func_type in ['global', 'layer']:
-            if not self.selections[func_type]:
+            if self.selection_counts[func_type] is None:
                 continue
 
-            # Flatten all selections without padding
-            all_selections = torch.cat([s.flatten() for s in self.selections[func_type]])
-
-            # Count selections
-            num_functions = max(all_selections.max().item() + 1, 1)
-            selection_counts = torch.bincount(all_selections, minlength=num_functions)
-
-            # Create visualization
+            # Create visualization directly from running counts
             fig, ax = plt.subplots(figsize=(15, 8))
-            heatmap = ax.imshow(selection_counts.view(1, -1), 
-                              aspect='auto', 
-                              cmap='viridis')
+            heatmap = ax.imshow(self.selection_counts[func_type].view(1, -1), 
+                            aspect='auto', 
+                            cmap='viridis')
 
             plt.colorbar(heatmap)
             ax.set_title(f'{func_type.capitalize()} Function Selection Frequencies')
             ax.set_xlabel('Function Index')
             ax.set_ylabel('Frequency')
 
-            # Save visualization
             plt.savefig(self.save_dir / f'{func_type}_function_selections.png')
             plt.close()
 
-            # Log to wandb
             if self.log_to_wandb:
                 wandb.log({
-                    f'function_selection/{func_type}_heatmap': wandb.Image(str(self.save_dir / f'{func_type}_function_selections.png'))
+                    f'function_selection/{func_type}_heatmap': wandb.Image(
+                        str(self.save_dir / f'{func_type}_function_selections.png')
+                    )
                 })
 
 
