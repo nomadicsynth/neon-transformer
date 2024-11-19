@@ -98,6 +98,27 @@ class WandbArguments:
     )
 
 
+@dataclass
+class ExperimentArguments:
+    adjust_steps_for_bank_sizes: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to adjust the number of steps for the bank sizes"
+        },
+    )
+    ref_global_num_functions: int = field(
+        default=4,
+        metadata={"help": "Number of global functions in the reference model"},
+    )
+    ref_layer_num_functions: int = field(
+        default=4,
+        metadata={"help": "Number of functions in each layer in the reference model"},
+    )
+    ref_layers: int = field(
+        default=4, metadata={"help": "Number of layers in the reference model"}
+    )
+
+
 def get_model_config(args: ModelArguments, tokenizer=None) -> NeonConfig:
     """Get model configuration based on size variant."""
 
@@ -459,23 +480,6 @@ class FunctionSelectionCallback(TrainerCallback):
                         self.selections[func_type].extend(selections)
                         layer.function_selections[func_type] = []
 
-            # Global functions (model level)
-            # if hasattr(model.model, 'global_functions'):
-            #     for func_idx, func in enumerate(model.model.global_functions):
-            #         wandb.log({
-            #             f"parameters/model.global_functions.{func_idx}.weight": wandb.Histogram(func.weight.data.cpu()),
-            #             f"gradients/model.global_functions.{func_idx}.weight": wandb.Histogram(func.weight.grad.cpu())
-            #         })
-            
-            # Layer functions (per layer)
-            # for layer_idx, layer in enumerate(model.model.layers):
-            #     if layer.use_layer_functions:
-            #         for func_idx, func in enumerate(layer.layer_functions):
-            #             wandb.log({
-            #                 f"parameters/model.layers.{layer_idx}.layer_functions.{func_idx}.weight": wandb.Histogram(func.weight.data.cpu()),
-            #                 f"gradients/model.layers.{layer_idx}.layer_functions.{func_idx}.weight": wandb.Histogram(func.weight.grad.cpu())
-            #             })
-
 
     def on_train_end(self, args, state, control, **kwargs):
         if state.is_local_process_zero:
@@ -489,11 +493,11 @@ class FunctionSelectionCallback(TrainerCallback):
 
             # Flatten all selections without padding
             all_selections = torch.cat([s.flatten() for s in self.selections[func_type]])
-            
+
             # Count selections
             num_functions = max(all_selections.max().item() + 1, 1)
             selection_counts = torch.bincount(all_selections, minlength=num_functions)
-            
+
             # Create visualization
             fig, ax = plt.subplots(figsize=(15, 8))
             heatmap = ax.imshow(selection_counts.view(1, -1), 
@@ -516,12 +520,26 @@ class FunctionSelectionCallback(TrainerCallback):
                 })
 
 
+def compute_scaling_factor(
+    global_bank_size,
+    layer_bank_size,
+    num_layers,
+    ref_global_size,
+    ref_layer_size,
+    ref_layers,
+):
+    model_bank_size = global_bank_size + (layer_bank_size * num_layers)
+    ref_bank_size = ref_global_size + (ref_layer_size * ref_layers)
+
+    return model_bank_size / ref_bank_size
+
+
 def main():
     print("Processing command-line arguments")
     from transformers import HfArgumentParser
 
-    parser = HfArgumentParser((ModelArguments, DataArguments, SFTConfig, WandbArguments))
-    model_args, data_args, training_args, wandb_args = (parser.parse_args_into_dataclasses())
+    parser = HfArgumentParser((ModelArguments, DataArguments, SFTConfig, WandbArguments, ExperimentArguments))
+    model_args, data_args, training_args, wandb_args, experiment_args = (parser.parse_args_into_dataclasses())
 
     # Configure wandb logging
     if "wandb" in training_args.report_to:
@@ -576,6 +594,18 @@ def main():
         else f"{model_num_params / 1e9:.2f}B"
     )
     print(f"Model has {model_num_params} parameters")
+
+    # Adjust max_steps if required
+    if experiment_args.adjust_steps_for_bank_sizes:
+        scaling_factor = compute_scaling_factor(
+            model_args.num_global_functions,
+            model_args.num_layer_functions,
+            model.config.num_hidden_layers,
+            experiment_args.ref_global_num_functions,
+            experiment_args.ref_layer_num_functions,
+            experiment_args.ref_layers,
+        )
+        training_args.max_steps = int(training_args.max_steps * scaling_factor)
 
     # Initialize trainer
     print("Initializing trainer")

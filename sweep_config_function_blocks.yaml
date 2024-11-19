@@ -6,22 +6,19 @@ metric:
 
 parameters:
   # Sweep parameters
-  decoder_implementation:
-    # Literal["regular", "memory", "function", "linear-control"] = "regular",
-    distribution: categorical
-    values: [function, linear-control]
   num_global_functions:
     distribution: categorical
-    values: [0, 64, 128, 192]
+    values: [4, 64, 128, 192]
   num_layer_functions:
     distribution: categorical
-    values: [0, 64, 128, 192]
-  learning_rate:
-    distribution: log_uniform_values
-    min: 1e-3
-    max: 1e-2
+    values: [4, 64, 128, 192]
 
   # Fixed parameters
+  decoder_implementation:
+    # Literal["regular", "memory", "function", "linear-control"] = "regular",
+    value: function
+  learning_rate:
+    value: 3e-3
   adam_beta1:
     value: 0.9
   adam_beta2:
@@ -55,7 +52,7 @@ parameters:
   max_seq_length:
     value: 128
   max_steps:
-    value: 25000
+    value: 10000
   model_size:
     value: test
   num_eval_samples:
