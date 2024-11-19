@@ -557,7 +557,12 @@ def main():
         os.environ["WANDB_LOG_MODEL"] = wandb_args.wandb_log_model
 
         # Update run name to include key hyperparameters
-        run_name = f"lr{training_args.learning_rate:.2e}_gm{model_args.num_global_memories}_lm{model_args.num_layer_memories}"
+        if model_args.decoder_implementation == "memory":
+            run_name = f"lr{training_args.learning_rate:.2e}_gm{model_args.num_global_memories}_lm{model_args.num_layer_memories}"
+        elif model_args.decoder_implementation == "function":
+            run_name = f"lr{training_args.learning_rate:.2e}_gf{model_args.num_global_functions}_lf{model_args.num_layer_functions}"
+        else:
+            run_name = f"lr{training_args.learning_rate:.2e}"
         if not hasattr(training_args, "run_name") or not training_args.run_name:
             training_args.run_name = run_name
         else:
