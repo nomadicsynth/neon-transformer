@@ -894,10 +894,10 @@ class NeonFlamingMoEDecoderLayer(NeonDecoderLayer):
             scores = self.global_function_scorer(x)
             selections = F.gumbel_softmax(scores, tau=1.0, hard=True, dim=-1)  # [batch, seq, num_funcs]
 
-            if self.training:
-                # For visualization, get the hard choices
-                selected_idx = torch.argmax(scores, dim=-1)
-                self.function_selections['global'].append(selected_idx.detach().cpu())
+            # if self.training:
+            #     # For visualization, get the hard choices
+            #     selected_idx = torch.argmax(scores, dim=-1)
+            #     self.function_selections['global'].append(selected_idx.detach().cpu())
 
             # Apply all functions and combine with selections
             transformed = torch.stack([func(x) for func in global_functions], dim=-2)  # [batch, seq, num_funcs, hidden]
@@ -908,9 +908,9 @@ class NeonFlamingMoEDecoderLayer(NeonDecoderLayer):
             scores = self.layer_function_scorer(x)
             selections = F.gumbel_softmax(scores, tau=1.0, hard=True, dim=-1)
 
-            if self.training:
-                selected_idx = torch.argmax(scores, dim=-1)
-                self.function_selections['layer'].append(selected_idx.detach().cpu())
+            # if self.training:
+            #     selected_idx = torch.argmax(scores, dim=-1)
+            #     self.function_selections['layer'].append(selected_idx.detach().cpu())
 
             # Apply selected layer function
             transformed = torch.stack([func(x) for func in self.layer_functions], dim=-2)
