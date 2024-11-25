@@ -64,7 +64,6 @@ def prepare_dataset(args: DataArguments, model_name_or_path: str):
     tokenizer.chat_template = "{% if not add_generation_prompt is defined %}{% set add_generation_prompt = false %}{% endif %}{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
     tokenizer.add_special_tokens({"additional_special_tokens": ["<|im_start|>", "<|im_end|>"]})
 
-
     # Set pad token to eos token
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.set_truncation_and_padding(
@@ -73,7 +72,7 @@ def prepare_dataset(args: DataArguments, model_name_or_path: str):
         max_length=args.max_seq_length,
         stride=args.max_seq_length // 8,
         pad_to_multiple_of=8,
-        padding_side="right",
+        padding_side="left",
     )
 
     # Load dataset with streaming if specified
@@ -184,6 +183,7 @@ def main():
         device_map="auto",
         torch_dtype="bfloat16",
     )
+    model.config.use_cache = False
     model_num_params = sum(p.numel() for p in model.parameters())
     model_num_params = (
         f"{model_num_params / 1e6:.2f}M"
