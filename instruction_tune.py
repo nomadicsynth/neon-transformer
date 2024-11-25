@@ -1,15 +1,17 @@
 print("Loading imports")
+import warnings
 from dataclasses import dataclass, field
-from os import PathLike
 
 import evaluate
 import torch
-from datasets import load_from_disk, IterableDatasetDict
+from datasets import IterableDatasetDict, load_from_disk
 from transformers import EvalPrediction
 from transformers.tokenization_utils import PaddingStrategy, TruncationStrategy
 from trl import SFTConfig, SFTTrainer
 
 from neon import NeonForCausalLM
+
+warnings.filterwarnings("ignore", message=".*autocast.*", category=FutureWarning)
 
 
 @dataclass
@@ -77,7 +79,10 @@ def prepare_dataset(args: DataArguments, model_name_or_path: str):
 
     # Load dataset with streaming if specified
     print("Loading dataset")
-    dataset = load_from_disk("/mnt/embiggen/ai-stuff/datasets/OpenHermes-2.5-chatML-splits/", keep_in_memory=True)
+    dataset = load_from_disk(
+        "/mnt/ai-stuff-fast/models/neon-transformer/dataset/OpenHermes-2.5-chatML-splits",
+        keep_in_memory=True,
+    )
     iter_dataset = IterableDatasetDict()
     for split in dataset.keys():
         iter_dataset[split] = dataset[split].to_iterable_dataset()
