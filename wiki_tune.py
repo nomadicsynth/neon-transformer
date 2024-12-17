@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 import evaluate
 import torch
-from datasets import Dataset, DatasetDict, IterableDatasetDict, load_from_disk
+from datasets import load_from_disk
 from transformers import EvalPrediction
 from transformers.tokenization_utils import PaddingStrategy, TruncationStrategy
 from trl import SFTConfig, SFTTrainer
@@ -25,7 +25,7 @@ class ModelArguments:
 @dataclass
 class DataArguments:
     dataset_name: str = field(
-        default="/mnt/embiggen/ai-stuff/datasets/wikipedia-20231101.en-science-sci-fi/",
+        default="dataset/wikipedia-20231101.en-science-sci-fi/",
         metadata={"help": "Name of the dataset to use"},
     )
     num_train_samples: int = field(
@@ -85,13 +85,6 @@ def prepare_dataset(args: DataArguments, model_name_or_path: str):
     if args.num_train_samples > 0:
         dataset["train"] = dataset["train"].select(range(args.num_train_samples))
     dataset.flatten_indices()
-
-    # iter_dataset = IterableDatasetDict()
-    # if isinstance(dataset, DatasetDict):
-    #     iter_dataset["train"] = dataset["train"].to_iterable_dataset(10)
-    #     iter_dataset["test"] = dataset["test"].to_iterable_dataset(1)
-    # elif isinstance(dataset, Dataset):
-    #     iter_dataset["train"] = dataset.to_iterable_dataset(10)
 
     return dataset, tokenizer
 
@@ -178,8 +171,6 @@ def main():
     # Prepare dataset
     data_args.max_seq_length = training_args.max_seq_length
     datasets, tokenizer = prepare_dataset(data_args, model_name_or_path=model_args.model_name_or_path)
-    # if not training_args.max_steps > 0:
-    #     training_args.max_steps = (data_args.num_train_samples // training_args.per_device_train_batch_size)
 
     # Initialize model
     print("Initializing model")
@@ -190,12 +181,12 @@ def main():
 
     model = NeonForCausalLM.from_pretrained(
         model_args.model_name_or_path,
-        attn_implementation="flash_attention_2",
+        attn_implementation=model_args._attn_implementation,
         device_map="auto",
         torch_dtype="bfloat16",
     )
     model.config.use_cache = False
-    model_num_params = sum(p.numel() for p in model.parameters())
+    model_num_params = model.num_parameters()
     model_num_params = (
         f"{model_num_params / 1e6:.2f}M"
         if model_num_params > 1e6
