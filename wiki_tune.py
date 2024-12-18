@@ -204,7 +204,7 @@ def main():
         args=training_args,
         train_dataset=datasets["train"],
         eval_dataset=datasets["test"],
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         compute_metrics=compute_metrics,
     )
 
