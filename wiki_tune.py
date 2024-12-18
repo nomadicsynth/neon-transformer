@@ -38,7 +38,6 @@ class DataArguments:
         default=False,
         metadata={"help": "Whether to keep the dataset in memory instead of memory mapping it"},
     )
-    
 
 
 @dataclass
@@ -62,35 +61,46 @@ class WandbArguments:
     )
 
 
-def prepare_dataset(args: DataArguments, model_name_or_path: str):
+def prepare_dataset(args: DataArguments):
+    """Load and prepare the dataset with support for both regular and streaming modes."""
+    from transformers import AutoTokenizer
+
+    print("Loading dataset")
+    dataset = load_from_disk(args.dataset_name, keep_in_memory=args.keep_in_memory)
+    dataset = dataset.train_test_split(
+        test_size=args.num_eval_samples,
+        seed=42,
+        shuffle=True,
+        keep_in_memory=args.keep_in_memory,
+    )
+    if args.num_train_samples > 0:
+        dataset["train"] = dataset["train"].select(
+            range(args.num_train_samples), keep_in_memory=args.keep_in_memory
+        )
+
+    return dataset
+
+
+def prepare_tokenizer(max_seq_length: int, model_name_or_path: str):
     """Load and prepare the dataset with support for both regular and streaming modes."""
     from transformers import AutoTokenizer
 
     # Load tokenizer
     print("Loading tokenizer")
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-    # tokenizer.chat_template = "{% if not add_generation_prompt is defined %}{% set add_generation_prompt = false %}{% endif %}{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
-    # tokenizer.add_special_tokens({"additional_special_tokens": ["<|im_start|>", "<|im_end|>"]})
 
-    # Set pad token to eos token
+    # Set padding and truncation strategies
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.set_truncation_and_padding(
         padding_strategy=PaddingStrategy.LONGEST,
         truncation_strategy=TruncationStrategy.LONGEST_FIRST,
-        max_length=args.max_seq_length,
-        stride=args.max_seq_length // 8,
+        max_length=max_seq_length,
+        stride=max_seq_length // 8,
         pad_to_multiple_of=8,
         padding_side="left",
     )
 
-    # Load dataset with streaming if specified
-    print("Loading dataset")
-    dataset = load_from_disk(args.dataset_name, keep_in_memory=args.keep_in_memory)
-    dataset = dataset.train_test_split(test_size=args.num_eval_samples, seed=42, shuffle=True, keep_in_memory=args.keep_in_memory)
-    if args.num_train_samples > 0:
-        dataset["train"] = dataset["train"].select(range(args.num_train_samples), keep_in_memory=args.keep_in_memory)
-
-    return dataset, tokenizer
+    return tokenizer
 
 
 metric_accuracy = evaluate.load("accuracy")
@@ -161,7 +171,7 @@ def main():
 
     training_args.batch_eval_metrics = True
     training_args.include_inputs_for_metrics = True
-    training_args.include_tokens_per_second = False
+    training_args.include_tokens_per_second = False  # Causes unnecessary dataset reprocessing at start of training, causing a huge delay
     training_args.include_num_input_tokens_seen = True
     training_args.dataset_text_field = (
         "text"
@@ -169,9 +179,11 @@ def main():
         else training_args.dataset_text_field
     )
 
-    # Prepare dataset
-    data_args.max_seq_length = training_args.max_seq_length
-    datasets, tokenizer = prepare_dataset(data_args, model_name_or_path=model_args.model_name_or_path)
+    dataset = prepare_dataset(data_args)
+
+    tokenizer = prepare_tokenizer(
+        training_args.max_seq_length, model_args.model_name_or_path
+    )
 
     # Initialize model
     print("Initializing model")
@@ -203,8 +215,8 @@ def main():
     trainer = SFTTrainer(
         model=model,
         args=training_args,
-        train_dataset=datasets["train"],
-        eval_dataset=datasets["test"],
+        train_dataset=dataset["train"],
+        eval_dataset=dataset["test"],
         processing_class=tokenizer,
         compute_metrics=compute_metrics,
     )
