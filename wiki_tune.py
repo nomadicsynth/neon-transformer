@@ -34,6 +34,11 @@ class DataArguments:
     num_eval_samples: int = field(
         default=100, metadata={"help": "Number of evaluation samples"}
     )
+    keep_in_memory: bool = field(
+        default=False,
+        metadata={"help": "Whether to keep the dataset in memory instead of memory mapping it"},
+    )
+    
 
 
 @dataclass
@@ -80,11 +85,11 @@ def prepare_dataset(args: DataArguments, model_name_or_path: str):
 
     # Load dataset with streaming if specified
     print("Loading dataset")
-    dataset = load_from_disk(args.dataset_name)
-    dataset = dataset.train_test_split(test_size=args.num_eval_samples, seed=42, shuffle=True)
+    dataset = load_from_disk(args.dataset_name, keep_in_memory=args.keep_in_memory)
+    dataset = dataset.train_test_split(test_size=args.num_eval_samples, seed=42, shuffle=True, keep_in_memory=args.keep_in_memory)
     if args.num_train_samples > 0:
-        dataset["train"] = dataset["train"].select(range(args.num_train_samples))
-    dataset.flatten_indices()
+        dataset["train"] = dataset["train"].select(range(args.num_train_samples), keep_in_memory=args.keep_in_memory)
+    dataset.flatten_indices(keep_in_memory=args.keep_in_memory)
 
     return dataset, tokenizer
 
