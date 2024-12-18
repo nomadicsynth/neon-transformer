@@ -126,9 +126,6 @@ def compute_metrics(eval_pred: EvalPrediction, compute_result=False):
 
         metric_accuracy.add_batch(predictions=predictions, references=metric_labels)
 
-        # del logits, metric_labels, predictions, attention_mask
-        # torch.cuda.empty_cache()
-
     if compute_result:
         return {
             "accuracy": metric_accuracy.compute()["accuracy"],
