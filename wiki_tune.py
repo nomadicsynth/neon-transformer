@@ -110,7 +110,7 @@ def compute_metrics(eval_pred: EvalPrediction, compute_result=False):
 
         # Shift the labels and attention mask to the left
         metric_labels = metric_labels[..., 1:]
-        attention_mask = attention_mask[..., 1:]
+        attention_mask = attention_mask[..., 1:] if attention_mask is not None else None
         logits = logits[..., :-1, :]
 
         predictions = torch.argmax(logits, dim=-1)
@@ -123,12 +123,12 @@ def compute_metrics(eval_pred: EvalPrediction, compute_result=False):
         # Flatten the input and move to CPU
         metric_labels = metric_labels.flatten().cpu()
         predictions = predictions.flatten().cpu()
-        attention_mask = attention_mask.flatten().cpu()
+        attention_mask = attention_mask.flatten().cpu() if attention_mask is not None else None
 
         metric_accuracy.add_batch(predictions=predictions, references=metric_labels)
 
-        del logits, metric_labels, predictions, attention_mask
-        torch.cuda.empty_cache()
+        # del logits, metric_labels, predictions, attention_mask
+        # torch.cuda.empty_cache()
 
     if compute_result:
         return {
@@ -165,7 +165,7 @@ def main():
 
     training_args.batch_eval_metrics = True
     training_args.include_inputs_for_metrics = True
-    training_args.include_tokens_per_second = True
+    training_args.include_tokens_per_second = False
     training_args.include_num_input_tokens_seen = True
     training_args.dataset_text_field = (
         "text"
