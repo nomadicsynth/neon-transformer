@@ -137,9 +137,9 @@ def compute_metrics(eval_pred: EvalPrediction, compute_result=False):
         metric_accuracy.add_batch(predictions=predictions, references=metric_labels)
 
         del logits, metric_labels, predictions, attention_mask
-        torch.cuda.empty_cache()
 
     if compute_result:
+        torch.cuda.empty_cache()
         return {
             "accuracy": metric_accuracy.compute()["accuracy"],
         }
@@ -172,6 +172,7 @@ def main():
         # log the model
         os.environ["WANDB_LOG_MODEL"] = wandb_args.wandb_log_model
 
+    training_args.run_name = f"{training_args.run_name}-lr{training_args.learning_rate:.2e}-e{training_args.num_train_epochs}-ga{training_args.gradient_accumulation_steps}"
     training_args.batch_eval_metrics = True
     training_args.include_inputs_for_metrics = True
     training_args.include_tokens_per_second = False  # Causes unnecessary dataset reprocessing at start of training, causing a huge delay
