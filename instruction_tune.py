@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 import evaluate
 import torch
-from datasets import IterableDatasetDict, load_from_disk
+from datasets import load_from_disk
 from transformers import EvalPrediction
 from transformers.tokenization_utils import PaddingStrategy, TruncationStrategy
 from trl import SFTConfig, SFTTrainer
@@ -25,13 +25,18 @@ class ModelArguments:
 @dataclass
 class DataArguments:
     dataset_name: str = field(
-        default="/mnt/embiggen/ai-stuff/datasets/OpenHermes-2.5-chatML-splits/", metadata={"help": "Name of the dataset to use"}
+        default="/mnt/embiggen/ai-stuff/datasets/OpenHermes-2.5-chatML-splits/",
+        metadata={"help": "Name of the dataset to use"},
     )
     num_train_samples: int = field(
         default=100, metadata={"help": "Number of training samples"}
     )
     num_eval_samples: int = field(
         default=100, metadata={"help": "Number of evaluation samples"}
+    )
+    keep_in_memory: bool = field(
+        default=False,
+        metadata={"help": "Whether to keep the dataset in memory instead of memory mapping it"},
     )
 
 
@@ -56,7 +61,27 @@ class WandbArguments:
     )
 
 
-def prepare_dataset(args: DataArguments, model_name_or_path: str):
+def prepare_dataset(args: DataArguments):
+    """Load and prepare the dataset with support for both regular and streaming modes."""
+    from transformers import AutoTokenizer
+
+    print("Loading dataset")
+    dataset = load_from_disk(args.dataset_name, keep_in_memory=args.keep_in_memory)
+    dataset = dataset.train_test_split(
+        test_size=args.num_eval_samples,
+        seed=42,
+        shuffle=True,
+        keep_in_memory=args.keep_in_memory,
+    )
+    if args.num_train_samples > 0:
+        dataset["train"] = dataset["train"].select(
+            range(args.num_train_samples), keep_in_memory=args.keep_in_memory
+        )
+
+    return dataset
+
+
+def prepare_tokenizer(max_seq_length: int, model_name_or_path: str):
     """Load and prepare the dataset with support for both regular and streaming modes."""
     from transformers import AutoTokenizer
 
@@ -66,28 +91,18 @@ def prepare_dataset(args: DataArguments, model_name_or_path: str):
     tokenizer.chat_template = "{% if not add_generation_prompt is defined %}{% set add_generation_prompt = false %}{% endif %}{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
     tokenizer.add_special_tokens({"additional_special_tokens": ["<|im_start|>", "<|im_end|>"]})
 
-    # Set pad token to eos token
+    # Set padding and truncation strategies
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.set_truncation_and_padding(
         padding_strategy=PaddingStrategy.LONGEST,
         truncation_strategy=TruncationStrategy.LONGEST_FIRST,
-        max_length=args.max_seq_length,
-        stride=args.max_seq_length // 8,
+        max_length=max_seq_length,
+        stride=max_seq_length // 8,
         pad_to_multiple_of=8,
         padding_side="left",
     )
 
-    # Load dataset with streaming if specified
-    print("Loading dataset")
-    dataset = load_from_disk(
-        "/mnt/ai-stuff-fast/models/neon-transformer/dataset/OpenHermes-2.5-chatML-splits",
-        keep_in_memory=True,
-    )
-    iter_dataset = IterableDatasetDict()
-    for split in dataset.keys():
-        iter_dataset[split] = dataset[split].to_iterable_dataset()
-
-    return iter_dataset, tokenizer
+    return tokenizer
 
 
 metric_accuracy = evaluate.load("accuracy")
@@ -106,7 +121,7 @@ def compute_metrics(eval_pred: EvalPrediction, compute_result=False):
 
         # Shift the labels and attention mask to the left
         metric_labels = metric_labels[..., 1:]
-        attention_mask = attention_mask[..., 1:]
+        attention_mask = attention_mask[..., 1:] if attention_mask is not None else None
         logits = logits[..., :-1, :]
 
         predictions = torch.argmax(logits, dim=-1)
@@ -119,14 +134,14 @@ def compute_metrics(eval_pred: EvalPrediction, compute_result=False):
         # Flatten the input and move to CPU
         metric_labels = metric_labels.flatten().cpu()
         predictions = predictions.flatten().cpu()
-        attention_mask = attention_mask.flatten().cpu()
+        attention_mask = attention_mask.flatten().cpu() if attention_mask is not None else None
 
         metric_accuracy.add_batch(predictions=predictions, references=metric_labels)
 
         del logits, metric_labels, predictions, attention_mask
-        torch.cuda.empty_cache()
 
     if compute_result:
+        torch.cuda.empty_cache()
         return {
             "accuracy": metric_accuracy.compute()["accuracy"],
         }
@@ -159,9 +174,10 @@ def main():
         # log the model
         os.environ["WANDB_LOG_MODEL"] = wandb_args.wandb_log_model
 
+    training_args.run_name = f"{training_args.run_name}-lr{training_args.learning_rate:.2e}-e{training_args.num_train_epochs}-ga{training_args.gradient_accumulation_steps}"
     training_args.batch_eval_metrics = True
     training_args.include_inputs_for_metrics = True
-    training_args.include_tokens_per_second = True
+    training_args.include_tokens_per_second = False  # Causes unnecessary dataset reprocessing at start of training, causing a huge delay
     training_args.include_num_input_tokens_seen = True
     training_args.dataset_text_field = (
         "text"
@@ -169,11 +185,11 @@ def main():
         else training_args.dataset_text_field
     )
 
-    # Prepare dataset
-    data_args.max_seq_length = training_args.max_seq_length
-    datasets, tokenizer = prepare_dataset(data_args, model_name_or_path=model_args.model_name_or_path)
-    if not training_args.max_steps > 0:
-        training_args.max_steps = (data_args.num_train_samples // training_args.per_device_train_batch_size)
+    dataset = prepare_dataset(data_args)
+
+    tokenizer = prepare_tokenizer(
+        training_args.max_seq_length, model_args.model_name_or_path
+    )
 
     # Initialize model
     print("Initializing model")
@@ -184,12 +200,12 @@ def main():
 
     model = NeonForCausalLM.from_pretrained(
         model_args.model_name_or_path,
-        attn_implementation="flash_attention_2",
+        attn_implementation=model_args._attn_implementation,
         device_map="auto",
         torch_dtype="bfloat16",
     )
     model.config.use_cache = False
-    model_num_params = sum(p.numel() for p in model.parameters())
+    model_num_params = model.num_parameters()
     model_num_params = (
         f"{model_num_params / 1e6:.2f}M"
         if model_num_params > 1e6
@@ -205,8 +221,8 @@ def main():
     trainer = SFTTrainer(
         model=model,
         args=training_args,
-        train_dataset=datasets["train"],
-        eval_dataset=datasets["test"],
+        train_dataset=dataset["train"],
+        eval_dataset=dataset["test"],
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
     )
