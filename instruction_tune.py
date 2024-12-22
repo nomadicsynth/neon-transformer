@@ -63,7 +63,6 @@ class WandbArguments:
 
 def prepare_dataset(args: DataArguments):
     """Load and prepare the dataset with support for both regular and streaming modes."""
-    from transformers import AutoTokenizer
 
     print("Loading dataset")
     dataset = load_from_disk(args.dataset_name, keep_in_memory=args.keep_in_memory)
