@@ -67,14 +67,12 @@ def prepare_dataset(args: DataArguments):
 
     print("Loading dataset")
     dataset = load_from_disk(args.dataset_name, keep_in_memory=args.keep_in_memory)
-    dataset = dataset.train_test_split(
-        test_size=args.num_eval_samples,
-        seed=42,
-        shuffle=True,
-        keep_in_memory=args.keep_in_memory,
-    )
     if args.num_train_samples > 0:
         dataset["train"] = dataset["train"].select(
+            range(args.num_train_samples), keep_in_memory=args.keep_in_memory
+        )
+    if args.num_eval_samples > 0:
+        dataset["test"] = dataset["test"].select(
             range(args.num_train_samples), keep_in_memory=args.keep_in_memory
         )
 
