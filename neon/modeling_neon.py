@@ -27,6 +27,7 @@ import torch.utils.checkpoint
 from torch.nn import functional as F
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from transformers import __version__ as transformers_version
 from transformers.activations import ACT2FN
 from transformers.cache_utils import (Cache, DynamicCache, SlidingWindowCache,
                                       StaticCache)
@@ -1615,9 +1616,12 @@ class NeonForCausalLM(NeonPreTrainedModel, GenerationMixin):
             logger.warning_once(
                 "Starting from v4.46, the `logits` model output will have the same type as the model (except at train time, where it will always be FP32)"
             )
-        # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
-        # TODO: remove the float() operation in v4.46
-        logits = self.lm_head(hidden_states[:, -num_logits_to_keep:, :]).float()
+            # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
+            # TODO: remove the float() operation in v4.46
+            # If the transformers version is v4.46 or lower, the logits will be upcasted to float
+        logits = self.lm_head(hidden_states[:, -num_logits_to_keep:, :])
+        if transformers_version < "4.46.0":
+            logits = logits.float()
 
         loss = None
         if labels is not None:
