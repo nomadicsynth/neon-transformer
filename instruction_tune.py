@@ -25,7 +25,7 @@ class ModelArguments:
 @dataclass
 class DataArguments:
     dataset_name: str = field(
-        default="/mnt/embiggen/ai-stuff/datasets/OpenHermes-2.5-chatML-splits/",
+        default="./dataset/OpenHermes-2.5-chatML-splits/",
         metadata={"help": "Name of the dataset to use"},
     )
     num_train_samples: int = field(
