@@ -33,7 +33,7 @@ class DataArguments:
         metadata={"help": "Name of the dataset configuration to use"},
     )
     num_train_samples: int = field(
-        default=0, metadata={"help": "Number of training samples"}
+        default=1000000, metadata={"help": "Number of training samples"}
     )
     num_eval_samples: int = field(
         default=2048, metadata={"help": "Number of evaluation samples"}
@@ -86,10 +86,14 @@ def prepare_dataset(args: DataArguments):
                     seed=42,
                     keep_in_memory=args.keep_in_memory,
                 )
+    else:
+        ValueError("`--num_eval_samples` must be greater than 0.")
+
     if args.num_train_samples > 0:
-        dataset["train"] = dataset["train"].select(
-            range(args.num_train_samples), keep_in_memory=args.keep_in_memory
-        )
+        if len(dataset["train"]) > args.num_train_samples:
+            dataset["train"] = dataset["train"].select(range(args.num_train_samples))
+        else:
+            ValueError("`--num_train_samples` must be less than the number of available training samples.")
 
     return dataset
 
