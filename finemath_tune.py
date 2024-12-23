@@ -28,6 +28,10 @@ class DataArguments:
         default="HuggingFaceTB/finemath",
         metadata={"help": "Name of the dataset to use"},
     )
+    dataset_config_name: str = field(
+        default="finemath-4plus",
+        metadata={"help": "Name of the dataset configuration to use"},
+    )
     num_train_samples: int = field(
         default=0, metadata={"help": "Number of training samples"}
     )
@@ -65,7 +69,7 @@ def prepare_dataset(args: DataArguments):
     """Load and prepare the dataset with support for both regular and streaming modes."""
 
     print("Loading dataset")
-    dataset = load_dataset(args.dataset_name, keep_in_memory=args.keep_in_memory)
+    dataset = load_dataset(args.dataset_name, args.dataset_config_name, keep_in_memory=args.keep_in_memory)
     if args.num_eval_samples > 0:
         if "test" not in dataset:
             if "train" in dataset:
