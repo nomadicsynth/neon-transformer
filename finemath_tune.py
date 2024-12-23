@@ -101,8 +101,6 @@ def prepare_tokenizer(max_seq_length: int, model_name_or_path: str):
     # Load tokenizer
     print("Loading tokenizer")
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-    tokenizer.chat_template = "{% if not add_generation_prompt is defined %}{% set add_generation_prompt = false %}{% endif %}{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
-    tokenizer.add_special_tokens({"additional_special_tokens": ["<|im_start|>", "<|im_end|>"]})
 
     # Set padding and truncation strategies
     tokenizer.pad_token = tokenizer.eos_token
