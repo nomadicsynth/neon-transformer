@@ -25,7 +25,8 @@ class NeonGenerator:
         self.model = NeonForCausalLM.from_pretrained(
             model_path, 
             config=config, 
-            torch_dtype=torch.bfloat16
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
         ).eval().to(self.device)
 
     def generate(self, prompt, max_length=50, temperature=1.0):
