@@ -1,8 +1,4 @@
 import argparse
-import torch
-from transformers import AutoTokenizer, TextStreamer
-from neon import NeonConfig, NeonForCausalLM
-
 
 # Get command-line arguments
 parser = argparse.ArgumentParser()
@@ -12,6 +8,15 @@ parser.add_argument("--max_length", type=int, default=50, help="The maximum leng
 parser.add_argument("--temperature", type=float, default=1.0, help="The temperature for sampling")
 parser.add_argument("--device", type=str, default="cpu", help="The device to run the model on")
 args = parser.parse_args()
+
+import torch
+from transformers import AutoTokenizer, TextStreamer
+from transformers.utils import logging
+
+from neon import NeonConfig, NeonForCausalLM
+
+logger = logging.get_logger("neon.modeling_neon")
+logger.setLevel(logging.ERROR)
 
 model_path = args.model_path
 
