@@ -245,7 +245,7 @@ def main():
     # Train the model
     try:
         print("Starting training")
-        trainer.train()
+        trainer.train(resume_from_checkpoint=bool(training_args.resume_from_checkpoint))
     except KeyboardInterrupt:
         print("Training interrupted")
     finally:
