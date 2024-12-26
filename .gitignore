@@ -11,4 +11,4 @@ function_videos/
 commands.txt
 dataset/
 deepspeed_config.json
-.venv/
+.venv*/
