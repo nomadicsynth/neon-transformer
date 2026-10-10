@@ -1,7 +1,7 @@
 # flash_attn
 # torch
 bitsandbytes==0.44.1
-datasets==3.0.2
+datasets==5.0.1
 evaluate==0.4.3
 scikit-learn==1.5.2
 transformers==5.10.1
